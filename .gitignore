@@ -1,0 +1,5 @@
+target/
+branch-futures-artifacts/
+.env
+.env.*
+!.env.example
