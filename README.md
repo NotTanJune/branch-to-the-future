@@ -1,4 +1,7 @@
-# Branch Futures
+<h1>
+  Branch Futures
+  <img src="https://media1.tenor.com/m/cDYTvaH9nlYAAAAd/pixel-art-delorean.gif" width="56" alt="Pixel art DeLorean">
+</h1>
 
 Branch Futures is a terminal-native change impact simulator. You describe a planned code change, it scans a local repository or a GitHub repository link, asks OpenAI for a structured blast-radius analysis, shows the result in a Ratatui TUI, and exports a Markdown report.
 
@@ -65,6 +68,8 @@ Optional model override:
 ```bash
 export BRANCH_FUTURES_MODEL=gpt-5.2
 ```
+
+`BRANCH_FUTURES_MODEL` is still supported as a backwards-compatible fallback.
 
 GitHub authentication uses `git clone --depth 1` with an in-memory HTTP extra header. The token is not written into the clone URL.
 
@@ -302,7 +307,7 @@ Export:
 +-------------------------+       +-------------------------+
 | Repo source resolver    | ----> | Temporary GitHub clone  |
 | src/repo_source.rs      |       | git clone --depth 1     |
-| .env GitHub token load  |       | temp/branch-futures... |
+| .env GitHub token load  |       | temp/branch-futures.. |
 +-----------+-------------+       +-----------+-------------+
             |                                 |
             +---------------+-----------------+
