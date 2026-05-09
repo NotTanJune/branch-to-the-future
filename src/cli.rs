@@ -9,10 +9,13 @@ use std::{
 use anyhow::{bail, Result};
 use clap::{Parser, ValueEnum};
 
+use crate::repo_source::is_github_repo_link;
+
 #[derive(Debug, Clone, Parser)]
 #[command(name = "brf")]
 #[command(about = "Terminal-native change impact simulator")]
 pub struct Cli {
+    #[arg(value_name = "REPO_PATH_OR_GITHUB_URL")]
     pub repo_path: PathBuf,
     #[arg(long, default_value_t = 200_000)]
     pub max_file_bytes: u64,
@@ -24,7 +27,7 @@ pub struct Cli {
     pub text_model: String,
     #[arg(long, value_enum, default_value_t = ReasoningEffort::Low)]
     pub reasoning_effort: ReasoningEffort,
-    #[arg(long, default_value_t = 2_500)]
+    #[arg(long, default_value_t = 8_000)]
     pub max_output_tokens: u32,
     #[arg(long, default_value_t = 80)]
     pub max_prompt_files: usize,
@@ -52,6 +55,12 @@ impl Cli {
             .clone()
             .unwrap_or_else(|| self.repo_path.clone())
     }
+
+    pub fn resolved_output_dir_for(&self, local_repo_path: &Path) -> PathBuf {
+        self.output_dir
+            .clone()
+            .unwrap_or_else(|| local_repo_path.to_path_buf())
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -76,11 +85,13 @@ impl ReasoningEffort {
 }
 
 pub fn validate_startup(cli: &Cli, api_key: Option<&str>) -> Result<()> {
-    if !cli.repo_path.exists() {
-        bail!("repo path does not exist: {}", cli.repo_path.display());
-    }
-    if !cli.repo_path.is_dir() {
-        bail!("repo path is not a directory: {}", cli.repo_path.display());
+    if !is_github_repo_link(&cli.repo_path) {
+        if !cli.repo_path.exists() {
+            bail!("repo path does not exist: {}", cli.repo_path.display());
+        }
+        if !cli.repo_path.is_dir() {
+            bail!("repo path is not a directory: {}", cli.repo_path.display());
+        }
     }
     if api_key.map(str::trim).unwrap_or_default().is_empty() {
         bail!("OPENAI_API_KEY is required before analysis");
@@ -89,13 +100,17 @@ pub fn validate_startup(cli: &Cli, api_key: Option<&str>) -> Result<()> {
 }
 
 pub fn load_openai_api_key(cli: &Cli) -> Result<String> {
-    let cwd = env::current_dir()?;
-    let search_dirs = if cwd == cli.repo_path {
-        vec![cwd]
-    } else {
-        vec![cwd, cli.repo_path.clone()]
-    };
+    let search_dirs = dotenv_search_dirs(cli)?;
     resolve_openai_api_key(env::var("OPENAI_API_KEY").ok().as_deref(), &search_dirs)
+}
+
+pub fn dotenv_search_dirs(cli: &Cli) -> Result<Vec<PathBuf>> {
+    let cwd = env::current_dir()?;
+    let mut search_dirs = vec![cwd.clone()];
+    if cli.repo_path.exists() && cli.repo_path != cwd {
+        search_dirs.push(cli.repo_path.clone());
+    }
+    Ok(search_dirs)
 }
 
 pub fn resolve_openai_api_key(

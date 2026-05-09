@@ -178,7 +178,9 @@ fn classify(path: &str) -> FileKind {
     if is_config(path) {
         return FileKind::Config;
     }
-    if lower.contains("/tests/")
+    if lower.starts_with("tests/")
+        || lower.contains("/tests/")
+        || lower.starts_with("__tests__/")
         || lower.contains("/__tests__/")
         || lower.ends_with(".test.ts")
         || lower.ends_with(".test.tsx")
@@ -186,6 +188,8 @@ fn classify(path: &str) -> FileKind {
         || lower.ends_with(".spec.tsx")
         || lower.ends_with("_test.py")
         || lower.ends_with(".test.rs")
+        || lower.ends_with("_test.rs")
+        || lower.ends_with("_tests.rs")
     {
         return FileKind::Test;
     }

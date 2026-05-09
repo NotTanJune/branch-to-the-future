@@ -5,4 +5,5 @@ pub mod cli;
 pub mod domain;
 pub mod fx;
 pub mod repo;
+pub mod repo_source;
 pub mod ui;

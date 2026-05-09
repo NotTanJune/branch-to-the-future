@@ -1,7 +1,22 @@
-use ratatui::{layout::Margin, style::Color};
-use tachyonfx::{fx, fx::RepeatMode, CellFilter, Effect, Interpolation, Motion};
+use ratatui::{
+    layout::Margin,
+    style::{Color, Style},
+};
+use tachyonfx::{
+    fx::{self, ExpandDirection, RepeatMode},
+    CellFilter, Effect, EffectTimer, Interpolation, Motion,
+};
 
 use crate::domain::AnimationStage;
+
+#[cfg(test)]
+const SCREEN_TRANSITION_STAGES: [AnimationStage; 4] = [
+    AnimationStage::RepoMaterialize,
+    AnimationStage::ImpactToFutures,
+    AnimationStage::FuturesToImpact,
+    AnimationStage::DiagramReveal,
+];
+const SCREEN_TRANSITION_MS: u32 = 1600;
 
 pub fn stage_effect(stage: AnimationStage) -> Effect {
     let text_only = CellFilter::AllOf(vec![CellFilter::Inner(Margin::new(1, 1)), CellFilter::Text]);
@@ -20,17 +35,7 @@ pub fn stage_effect(stage: AnimationStage) -> Effect {
             ),
         ])
         .with_filter(text_only),
-        AnimationStage::RepoMaterialize => fx::parallel(&[
-            fx::coalesce((650, Interpolation::CircOut)),
-            fx::slide_in(
-                Motion::UpToDown,
-                10,
-                1,
-                Color::Black,
-                (520, Interpolation::QuadOut),
-            ),
-        ])
-        .with_filter(text_only),
+        AnimationStage::RepoMaterialize => screen_bounce_transition(),
         AnimationStage::ScanningSweep => fx::parallel(&[
             fx::sweep_in(
                 Motion::LeftToRight,
@@ -90,65 +95,56 @@ pub fn stage_effect(stage: AnimationStage) -> Effect {
             fx::coalesce((300, Interpolation::QuadOut)),
         ])
         .with_filter(text_only),
-        AnimationStage::ImpactToFutures => fx::sequence(&[
-            fx::slide_out(
-                Motion::RightToLeft,
-                6,
-                1,
-                Color::Black,
-                (240, Interpolation::QuadIn),
-            ),
-            fx::parallel(&[
-                fx::slide_in(
-                    Motion::RightToLeft,
-                    10,
-                    1,
-                    Color::Black,
-                    (360, Interpolation::CircOut),
-                ),
-                fx::sweep_in(
-                    Motion::LeftToRight,
-                    10,
-                    1,
-                    Color::Cyan,
-                    (420, Interpolation::CircOut),
-                ),
-            ]),
-        ])
-        .with_filter(text_only),
-        AnimationStage::FuturesToImpact => fx::sequence(&[
-            fx::slide_out(
-                Motion::LeftToRight,
-                6,
-                1,
-                Color::Black,
-                (240, Interpolation::QuadIn),
-            ),
-            fx::parallel(&[
-                fx::slide_in(
-                    Motion::LeftToRight,
-                    10,
-                    1,
-                    Color::Black,
-                    (360, Interpolation::CircOut),
-                ),
-                fx::fade_to_fg(Color::Green, (320, Interpolation::QuadOut)),
-            ]),
-        ])
-        .with_filter(text_only),
-        AnimationStage::DiagramReveal => fx::sequence(&[
-            fx::parallel(&[
-                fx::dissolve((260, Interpolation::Linear)),
-                fx::coalesce((520, Interpolation::CircOut)),
-            ]),
-            fx::sweep_in(
-                Motion::LeftToRight,
-                18,
-                1,
-                Color::Cyan,
-                (520, Interpolation::CircOut),
-            ),
-        ])
-        .with_filter(text_only),
+        AnimationStage::ImpactToFutures
+        | AnimationStage::FuturesToImpact
+        | AnimationStage::DiagramReveal => screen_bounce_transition(),
+    }
+}
+
+fn screen_bounce_transition() -> Effect {
+    let style = Style::default()
+        .fg(Color::from_u32(0x32302F))
+        .bg(Color::from_u32(0x1D2021));
+
+    fx::expand(
+        ExpandDirection::Horizontal,
+        style,
+        EffectTimer::from_ms(SCREEN_TRANSITION_MS, Interpolation::BounceOut),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::{buffer::Buffer, layout::Rect};
+    use tachyonfx::Duration;
+
+    use super::*;
+
+    #[test]
+    fn screen_transition_stages_use_terminal_area() {
+        for stage in SCREEN_TRANSITION_STAGES {
+            assert_eq!(stage_effect(stage).area(), None, "{stage:?}");
+        }
+    }
+
+    #[test]
+    fn screen_transition_keeps_running_for_visible_bounce() {
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buffer = Buffer::empty(area);
+        let mut effect = stage_effect(AnimationStage::ImpactToFutures);
+
+        effect.process(Duration::from_millis(1000), &mut buffer, area);
+
+        assert!(
+            effect.running(),
+            "screen transition should still be running at 1000ms so BounceOut is visible"
+        );
+
+        effect.process(Duration::from_millis(600), &mut buffer, area);
+
+        assert!(
+            !effect.running(),
+            "screen transition should finish after the configured 1600ms bounce"
+        );
     }
 }

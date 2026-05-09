@@ -1,0 +1,205 @@
+# Repository File Structure
+
+Total items: 199
+
+```
+📁 .github
+📄 .gitignore
+📄 CHANGELOG.md
+📄 Cargo.lock
+📄 Cargo.toml
+📄 LICENSE
+📄 README.md
+📁 benches
+📄 build-docs.sh
+📁 docs-assets
+📁 docs
+📁 examples
+📁 images
+📄 release-plz.toml
+📄 release.toml
+📄 rustfmt.toml
+📁 scripts
+📄 serve-docs.sh
+📁 src
+  📄 dependabot.yml
+  📁 workflows
+  📄 cell_filter.rs
+  📄 cell_iteration.rs
+  📄 color_conversion.rs
+  📄 color_interpolation.rs
+  📄 hsl_hsv_conversion.rs
+  📄 lightness_adjustment.rs
+  📄 math_functions.rs
+  📄 parabolic_sin.rs
+  📄 saturation_adjustment.rs
+  📄 doc-header.html
+  📁 assets
+  📄 dsl.md
+  📁 basic-effects
+  📁 common
+  📁 effect-registry
+  📁 effect-showcase
+  📁 minimal
+  📁 tweens
+  📄 demo-0.6.0.gif
+  📄 demo.gif
+  📄 effect-timeline-widget.png
+  📄 effect-timeline.gif
+  📄 example-basic-effects.png
+  📄 example-dsl-playground.gif
+  📄 example-tweens.png
+  📄 tfx-ftl.png
+  📄 pre-commit
+  📄 bitvec.rs
+  📄 bounding_box.rs
+  📄 buffer_renderer.rs
+  📁 cell_filter
+  📄 cell_iter.rs
+  📄 color_cache.rs
+  📄 color_ext.rs
+  📄 color_mapper.rs
+  📄 color_space.rs
+  📁 dsl
+  📄 duration.rs
+  📄 effect.rs
+  📄 effect_manager.rs
+  📄 effect_timer.rs
+  📄 features.rs
+  📁 fx
+  📄 interpolation.rs
+  📄 lib.rs
+  📄 lru_cache.rs
+  📄 math.rs
+  📄 motion.rs
+  📁 pattern
+  📄 rect_ext.rs
+  📄 ref_rect.rs
+  📄 render_effect.rs
+  📄 shader.rs
+  📄 simple_rng.rs
+  📄 wave.rs
+  📁 widget
+    📄 build.yml
+    📄 release-plz.yml
+    📄 coalesce.gif
+    📄 coalesce_from.gif
+    📄 delay.gif
+    📄 dissolve.gif
+    📄 dissolve_to.gif
+    📄 effect_fn.gif
+    📄 effect_fn_buf.gif
+    📄 fade_from.gif
+    📄 fade_from_fg.gif
+    📄 fade_to.gif
+    📄 fade_to_fg.gif
+    📄 hsl_shift.gif
+    📄 hsl_shift_fg.gif
+    📄 never_complete.gif
+    📄 parallel.gif
+    📄 ping_pong.gif
+    📄 prolong_end.gif
+    📄 prolong_start.gif
+    📄 sequence.gif
+    📄 slide_in.gif
+    📄 slide_out.gif
+    📄 sweep_in.gif
+    📄 sweep_out.gif
+    📄 Cargo.toml
+    📁 src
+    📄 Cargo.toml
+    📁 src
+    📄 Cargo.toml
+    📁 src
+    📄 Cargo.toml
+    📁 src
+    📄 Cargo.toml
+    📁 src
+    📄 Cargo.toml
+    📁 src
+    📄 analyzer.rs
+    📄 filter.rs
+    📄 mod.rs
+    📄 predicate.rs
+    📄 processor.rs
+    📄 arguments.rs
+    📁 completions
+    📄 dsl.rs
+    📄 dsl_format.rs
+    📄 dsl_writer.rs
+    📄 environment.rs
+    📄 expr_promotion.rs
+    📄 expressions.rs
+    📄 method_chains.rs
+    📄 mod.rs
+    📄 parse_error.rs
+    📄 token_parsers.rs
+    📄 token_verification.rs
+    📄 tokenizer.rs
+    📄 alpha_xform.rs
+    📄 ansi256.rs
+    📄 consume_tick.rs
+    📄 containers.rs
+    📄 direction.rs
+    📄 dissolve.rs
+    📄 dynamic_area.rs
+    📄 evolve.rs
+    📄 expand.rs
+    📄 explode.rs
+    📄 fade.rs
+    📄 glitch.rs
+    📄 hsl_shift.rs
+    📄 lighten.rs
+    📄 mod.rs
+    📄 never_complete.rs
+    📄 offscreen_buffer.rs
+    📄 paint.rs
+    📄 ping_pong.rs
+    📄 prolong.rs
+    📄 repeat.rs
+    📄 resize.rs
+    📄 run_once.rs
+    📄 saturate.rs
+    📄 shader_fn.rs
+    📄 sleep.rs
+    📄 slide.rs
+    📄 sliding_window_alpha.rs
+    📄 stretch.rs
+    📄 sweep_in.rs
+    📄 temporary.rs
+    📄 translate.rs
+    📄 translate_buffer.rs
+    📄 unique.rs
+    📄 any_pattern.rs
+    📄 blend.rs
+    📄 checkerboard.rs
+    📄 coalesce.rs
+    📄 combined.rs
+    📄 diagonal.rs
+    📄 diamond.rs
+    📄 dissolve.rs
+    📄 instanced_pattern.rs
+    📄 inverted.rs
+    📄 mod.rs
+    📄 radial.rs
+    📄 spiral.rs
+    📄 sweep.rs
+    📄 wave.rs
+    📄 effect_span.rs
+    📄 mod.rs
+      📄 main.rs
+      📄 gruvbox.rs
+      📄 lib.rs
+      📄 window.rs
+      📄 main.rs
+      📄 main.rs
+      📄 main.rs
+      📄 main.rs
+      📄 context.rs
+      📄 dsl_type.rs
+      📄 engine.rs
+      📄 macros.rs
+      📄 matcher.rs
+      📄 mod.rs
+      📄 types.rs
+```

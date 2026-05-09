@@ -67,11 +67,22 @@ pub struct ParsedChangeRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImpactAnalysis {
     pub summary: String,
+    #[serde(default)]
+    pub current_architecture: Vec<ArchitectureStage>,
     pub impact_path: Vec<ImpactFile>,
     pub risk_summary: Vec<String>,
     pub tests_to_add: Vec<String>,
     pub futures: Vec<ImplementationFuture>,
     pub recommended_future: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArchitectureStage {
+    pub label: String,
+    #[serde(default)]
+    pub responsibilities: Vec<String>,
+    #[serde(default)]
+    pub files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -92,6 +103,8 @@ pub struct ImplementationFuture {
     pub description: String,
     pub complexity: Complexity,
     pub risk: RiskLevel,
+    #[serde(default)]
+    pub architecture: Vec<ArchitectureStage>,
     pub affected_files: Vec<String>,
     #[serde(default)]
     pub benefits: Vec<String>,
@@ -146,10 +159,69 @@ pub enum Screen {
     ImpactExplorer,
     FileDetail,
     FuturesCompare,
-    ArtifactGeneration,
+    RepoTree,
+    ArchitectureScaffold,
     ExportSummary,
     Error,
     Help,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImpactSort {
+    HighToLow,
+    LowToHigh,
+    ModelOrder,
+}
+
+impl ImpactSort {
+    pub fn next(self) -> Self {
+        match self {
+            ImpactSort::HighToLow => ImpactSort::LowToHigh,
+            ImpactSort::LowToHigh => ImpactSort::ModelOrder,
+            ImpactSort::ModelOrder => ImpactSort::HighToLow,
+        }
+    }
+}
+
+impl fmt::Display for ImpactSort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ImpactSort::HighToLow => write!(f, "high to low"),
+            ImpactSort::LowToHigh => write!(f, "low to high"),
+            ImpactSort::ModelOrder => write!(f, "model order"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchitectureZoom {
+    Normal,
+    Compact,
+}
+
+impl ArchitectureZoom {
+    pub fn zoom_out(self) -> Self {
+        match self {
+            ArchitectureZoom::Normal => ArchitectureZoom::Compact,
+            ArchitectureZoom::Compact => ArchitectureZoom::Compact,
+        }
+    }
+
+    pub fn zoom_in(self) -> Self {
+        match self {
+            ArchitectureZoom::Normal => ArchitectureZoom::Normal,
+            ArchitectureZoom::Compact => ArchitectureZoom::Normal,
+        }
+    }
+}
+
+impl fmt::Display for ArchitectureZoom {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ArchitectureZoom::Normal => write!(f, "normal"),
+            ArchitectureZoom::Compact => write!(f, "compact"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,13 +246,21 @@ where
     let value = serde_json::Value::deserialize(deserializer)?;
     let number = match value {
         serde_json::Value::Number(n) => n
-            .as_u64()
-            .or_else(|| n.as_i64().map(|v| v.max(0) as u64))
+            .as_f64()
             .ok_or_else(|| de::Error::custom("score must be numeric"))?,
         serde_json::Value::String(s) => s
-            .parse::<u64>()
+            .trim()
+            .parse::<f64>()
             .map_err(|_| de::Error::custom("score string must be numeric"))?,
         _ => return Err(de::Error::custom("score must be number or numeric string")),
     };
-    Ok(number.min(100) as u8)
+    if !number.is_finite() {
+        return Err(de::Error::custom("score must be finite"));
+    }
+    let normalized = if (0.0..=1.0).contains(&number) {
+        number * 100.0
+    } else {
+        number
+    };
+    Ok(normalized.clamp(0.0, 100.0).round() as u8)
 }

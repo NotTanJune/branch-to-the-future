@@ -14,20 +14,13 @@ pub fn export_markdown(
     repo_name: &str,
     analysis: &ImpactAnalysis,
     selected_future_index: usize,
-    image_path: Option<&Path>,
 ) -> Result<PathBuf> {
     let _ = session_id;
     fs::create_dir_all(output_dir)?;
     let report_path = output_dir.join("branch-futures-report.md");
     fs::write(
         &report_path,
-        render_markdown(
-            change_request,
-            repo_name,
-            analysis,
-            selected_future_index,
-            image_path,
-        ),
+        render_markdown(change_request, repo_name, analysis, selected_future_index),
     )?;
     Ok(report_path)
 }
@@ -37,7 +30,6 @@ pub fn render_markdown(
     repo_name: &str,
     analysis: &ImpactAnalysis,
     selected_future_index: usize,
-    image_path: Option<&Path>,
 ) -> String {
     let selected = analysis
         .futures
@@ -93,14 +85,8 @@ pub fn render_markdown(
     }
     out.push_str("\n## Patch Skeleton\n\n");
     out.push_str(&patch_skeleton(selected));
-    out.push_str("\n## Image Artifact\n\n");
-    if let Some(path) = image_path {
-        out.push_str(&format!("Architecture diagram: `{}`\n", path.display()));
-    } else {
-        out.push_str(
-            "Architecture diagram not generated yet. Press `g` in the TUI after analysis.\n",
-        );
-    }
+    out.push_str("\n## Architecture Scaffold\n\n");
+    out.push_str("Architecture scaffold is rendered in the TUI with terminal-native layout.\n");
     out
 }
 
