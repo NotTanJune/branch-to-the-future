@@ -4,6 +4,9 @@ Branch Futures is a terminal-native change impact simulator. You describe a plan
 
 It is not a code generator. It helps you understand what a change may touch before you implement it.
 
+## Demo
+https://github.com/user-attachments/assets/b17456a4-de5e-45e4-ac43-6fb36ba0df0a
+
 ## Requirements
 
 - Rust toolchain
