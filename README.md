@@ -1,6 +1,6 @@
 <h1>
-  Branch Futures
   <img src="https://media1.tenor.com/m/cDYTvaH9nlYAAAAd/pixel-art-delorean.gif" width="56" alt="Pixel art DeLorean">
+  Branch Futures
 </h1>
 
 Branch Futures is a terminal-native change impact simulator. You describe a planned code change, it scans a local repository or a GitHub repository link, asks OpenAI for a structured blast-radius analysis, shows the result in a Ratatui TUI, and exports a Markdown report.
