@@ -8,7 +8,7 @@ Branch to the Future is a terminal-native change impact simulator. You describe 
 It is not a code generator. It helps you understand what a change may touch before you implement it.
 
 ## Demo
-https://github.com/user-attachments/assets/b17456a4-de5e-45e4-ac43-6fb36ba0df0a
+https://github.com/user-attachments/assets/2177c491-30cb-4789-8b9c-be0a9e9a7d19
 
 ## Requirements
 
