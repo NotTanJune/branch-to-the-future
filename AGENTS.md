@@ -10,7 +10,7 @@ Before making changes, read `CODEX_CONTEXT.md`. It is the handoff file for recen
 
 ## Project Status
 
-The repo link expected by the user is `https://github.com/NotTanJune/branch-futures`. The binary command remains `brf`. The Rust library crate remains `branch_futures`.
+The repo link expected by the user is `https://github.com/NotTanJune/branch-to-the-future`. The binary command remains `brf`. The Rust library crate remains `branch_futures`.
 
 ## Workflow
 

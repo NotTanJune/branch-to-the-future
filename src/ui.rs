@@ -51,7 +51,7 @@ fn render_input(frame: &mut Frame<'_>, app: &App) {
         Line::from(key_hints(Screen::Input)).dark_gray(),
         Line::from(format!("Repo: {}", app.repo_path.display())).dark_gray(),
     ];
-    frame.render_widget(panel("Branch Futures", text), area);
+    frame.render_widget(panel("Branch to the Future", text), area);
 }
 
 fn render_scan(frame: &mut Frame<'_>, app: &App) {
@@ -70,7 +70,7 @@ fn render_scan(frame: &mut Frame<'_>, app: &App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Branch Futures"),
+                .title("Branch to the Future"),
         )
         .gauge_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
         .ratio(((app.spinner_frame % 20) as f64 + 1.0) / 20.0)
@@ -139,7 +139,7 @@ fn render_explorer(frame: &mut Frame<'_>, app: &App) {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Branch Futures: Impact Explorer"),
+                    .title("Branch to the Future: Impact Explorer"),
             )
             .wrap(Wrap { trim: true }),
         outer[0],
@@ -446,7 +446,7 @@ fn render_futures(frame: &mut Frame<'_>, app: &App) {
         List::new(items).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Branch Futures"),
+                .title("Branch to the Future"),
         ),
         outer[0],
     );

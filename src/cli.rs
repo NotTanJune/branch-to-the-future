@@ -47,7 +47,7 @@ impl Cli {
     }
 
     pub fn resolved_model(&self) -> String {
-        env::var("BRANCH_FUTURES_MODEL").unwrap_or_else(|_| self.text_model.clone())
+        env::var("BRANCH_TO_THE_FUTURE_MODEL").unwrap_or_else(|_| self.text_model.clone())
     }
 
     pub fn resolved_output_dir(&self) -> PathBuf {

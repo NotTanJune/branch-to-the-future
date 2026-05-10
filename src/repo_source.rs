@@ -210,7 +210,7 @@ fn base64_encode(bytes: &[u8]) -> String {
 }
 
 fn temp_clone_path(root: &Path, repo: &GitHubRepo) -> PathBuf {
-    root.join("branch-futures-clones").join(format!(
+    root.join("branch-to-the-future-clones").join(format!(
         "{}-{}-{}",
         safe_segment(&repo.owner),
         safe_segment(&repo.name),

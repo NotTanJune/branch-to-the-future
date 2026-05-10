@@ -168,7 +168,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "branch-futures"
+name = "branch-to-the-future"
 version = "0.1.0"
 dependencies = [
  "anyhow",

@@ -4,16 +4,15 @@ This file carries context from the previous Codex session because chat history d
 
 ## Repository Link
 
-- Primary folder: `/Users/nottanjune/Code-Projects/branch-futures`
-- Temporary copied folder may exist at `/Users/nottanjune/Code-Projects/branch-to-the-future`
-- Canonical repo URL: `https://github.com/NotTanJune/branch-futures`
-- Package name in `Cargo.toml`: `branch-futures`
+- Primary folder: `/Users/nottanjune/Code-Projects/branch-to-the-future`
+- Canonical repo URL: `https://github.com/NotTanJune/branch-to-the-future`
+- Package name in `Cargo.toml`: `branch-to-the-future`
 - Binary command: `brf`
 - Library crate name remains `branch_futures`
 
 ## README And Branding
 
-README was updated to use the product name `Branch Futures`.
+README was updated to use the product name `Branch to the Future`.
 
 README title includes this Tenor GIF next to the title:
 
@@ -39,7 +38,7 @@ GitHub repo links:
 
 - `brf https://github.com/owner/repo` is supported.
 - Repo links are cloned with `git clone --depth 1`.
-- Temp clone root is `branch-futures-clones`.
+- Temp clone root is `branch-to-the-future-clones`.
 - GitHub token keys are supported through env or `.env`: `GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_PAT`, `GITHUB_PERSONAL_ACCESS_TOKEN`.
 - Token is sent through a Git HTTP extra header, not embedded in the clone URL.
 
@@ -50,7 +49,7 @@ Analysis:
 - It accepts camelCase fields, scalar strings where arrays are expected, title-case risk and complexity, numeric strings, and `0.0` to `1.0` float scores.
 - Streaming truncated JSON triggers a retry with a larger output cap, up to `16000`.
 - Default output token cap is `8000`.
-- Model env var: `BRANCH_FUTURES_MODEL`.
+- Model env var: `BRANCH_TO_THE_FUTURE_MODEL`.
 
 Repo scanning:
 
@@ -76,9 +75,9 @@ Architecture:
 
 Exports:
 
-- Markdown report filename is `branch-futures-report.md`.
-- Report title is `Branch Futures Report`.
-- The section `Branch Futures` is still used for implementation alternatives. This is intentional for now because it names the concept.
+- Markdown report filename is `branch-to-the-future-report.md`.
+- Report title is `Branch to the Future Report`.
+- The section `Branch to the Future` is still used for implementation alternatives. This is intentional for now because it names the concept.
 
 ## Important Files
 
@@ -96,7 +95,7 @@ Exports:
 
 ## Verification Already Run
 
-In `/Users/nottanjune/Code-Projects/branch-futures`:
+In `/Users/nottanjune/Code-Projects/branch-to-the-future`:
 
 ```bash
 cargo test
@@ -106,7 +105,3 @@ brf --help
 ```
 
 All tests passed when run before this handoff.
-
-## Copy Caveat
-
-If using the temporary copied folder, make sure its `origin` remote points to `https://github.com/NotTanJune/branch-futures.git`.

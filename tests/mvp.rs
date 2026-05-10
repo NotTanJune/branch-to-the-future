@@ -160,7 +160,7 @@ fn startup_can_load_openai_api_key_from_dotenv_file() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join(".env"),
-        "\n# Branch Futures credentials\nOPENAI_API_KEY=\"sk-from-dotenv\"\nOTHER=value\n",
+        "\n# Branch to the Future credentials\nOPENAI_API_KEY=\"sk-from-dotenv\"\nOTHER=value\n",
     )
     .unwrap();
     let cli = Cli::parse_from(["brf", dir.path().to_str().unwrap()]);
@@ -357,17 +357,17 @@ fn markdown_export_contains_required_sections() {
         0,
     )
     .unwrap();
-    assert_eq!(path.file_name().unwrap(), "branch-futures-report.md");
+    assert_eq!(path.file_name().unwrap(), "branch-to-the-future-report.md");
     let report = fs::read_to_string(path).unwrap();
 
     for heading in [
-        "# Branch Futures Report",
+        "# Branch to the Future Report",
         "## Change Request",
         "## Repo Summary",
         "## Impact Path",
         "## Affected Files",
         "## Risk Summary",
-        "## Branch Futures",
+        "## Branch to the Future",
         "## Recommended Path",
         "## Test Plan",
         "## Patch Skeleton",

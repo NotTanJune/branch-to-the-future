@@ -1,8 +1,8 @@
-# Product Requirements Document: Branch Futures
+# Product Requirements Document: Branch to the Future
 
 ## 1. Product summary
 
-**Branch Futures** is a terminal-native developer tool that simulates the impact of a proposed code change before implementation. A developer describes a feature, refactor, or bug fix in natural language. The tool scans the repository, animates the exploration of affected files in a Ratatui interface, identifies the blast radius, compares multiple implementation paths, and generates developer artifacts such as patch plans, test plans, and visual architecture cards.
+**Branch to the Future** is a terminal-native developer tool that simulates the impact of a proposed code change before implementation. A developer describes a feature, refactor, or bug fix in natural language. The tool scans the repository, animates the exploration of affected files in a Ratatui interface, identifies the blast radius, compares multiple implementation paths, and generates developer artifacts such as patch plans, test plans, and visual architecture cards.
 
 The MVP focuses on a cinematic but useful terminal experience: the codebase is explored through animated motion, affected files are revealed progressively, and each file is backed by reasoning explaining why it may need to change.
 
@@ -10,7 +10,7 @@ The MVP focuses on a cinematic but useful terminal experience: the codebase is e
 
 Developers often begin implementing changes before understanding their full impact. This leads to missed files, broken tests, hidden migration requirements, and architecture drift. Current AI coding tools tend to jump directly into code generation, but the risky part is often not writing code; it is understanding what the change will touch.
 
-Branch Futures helps developers answer:
+Branch to the Future helps developers answer:
 
 - Which files are likely affected by this change?
 - Which parts of the system are risky?
@@ -35,7 +35,7 @@ Branch Futures helps developers answer:
 
 ## 4. Product positioning
 
-Branch Futures is not a code generator first. It is a **change impact simulator**.
+Branch to the Future is not a code generator first. It is a **change impact simulator**.
 
 The core positioning:
 
@@ -75,7 +75,7 @@ Alternative tagline:
 
 ## 6. Hackathon judging angle
 
-Branch Futures should demonstrate:
+Branch to the Future should demonstrate:
 
 - Strong GPT-5.5 usage for codebase reasoning and planning
 - Strong GPT Image 2 usage for developer-focused visual artifacts
@@ -94,7 +94,7 @@ The winning demo should make judges feel:
 Command:
 
 ```bash
-branch-futures ./sample-repo
+branch-to-the-future ./sample-repo
 ```
 
 The app opens a full-screen Ratatui interface.
@@ -152,7 +152,7 @@ The app summarizes:
 - risks
 - implementation complexity
 
-### Step 6: Branch Futures comparison
+### Step 6: Branch to the Future comparison
 
 The app compares three implementation paths:
 
@@ -376,7 +376,7 @@ The Impact Explorer is the central visual experience. It shows the codebase bein
 ### Required UI regions
 
 ```text
-┌─ Branch Futures: Impact Explorer ─────────────────────────────────┐
+┌─ Branch to the Future: Impact Explorer ─────────────────────────────────┐
 │ Change: add async resume parsing with status polling              │
 ├────────────────────── Repo Tree ───────────────┬──── Impact Path ─┤
 │ frontend/                                      │ 1 UploadForm.tsx │
@@ -476,7 +476,7 @@ Compare multiple possible implementations.
 ### Layout
 
 ```text
-┌─ Branch Futures ───────────────────────────────────────┐
+┌─ Branch to the Future ───────────────────────────────────────┐
 │ > A. Fast Prototype       Complexity: Low    Risk: High│
 │   B. Minimal Patch        Complexity: Med    Risk: Med │
 │   C. Proper Architecture  Complexity: High   Risk: Low │
@@ -518,7 +518,7 @@ For MVP, generate one of these:
 2. **Blast Radius Map**
    - Shows affected files/modules and risk intensity.
 
-3. **Branch Futures Comparison Card**
+3. **Branch to the Future Comparison Card**
    - Shows Fast Prototype vs Minimal Patch vs Proper Architecture.
 
 ### Example image-generation spec
@@ -536,7 +536,7 @@ For MVP, generate one of these:
 
 ### Output behavior
 
-- Save generated image to `./branch-futures-artifacts/session-id/blueprint.png`
+- Save generated image to `./branch-to-the-future-artifacts/session-id/blueprint.png`
 - Show path in terminal
 - Optionally open image in browser
 - Optionally show QR/local URL
@@ -605,7 +605,7 @@ Use a polished terminal aesthetic:
 2. Repo Scan
 3. Impact Explorer
 4. File Impact Detail
-5. Branch Futures Compare
+5. Branch to the Future Compare
 6. Artifact Generation
 7. Export Summary
 
@@ -889,12 +889,12 @@ Each of these should produce a rich impact path.
 
 ### Opening line
 
-“Most AI coding tools jump straight into writing code. Branch Futures does the step before that: it simulates the future of a code change so developers can understand the blast radius first.”
+“Most AI coding tools jump straight into writing code. Branch to the Future does the step before that: it simulates the future of a code change so developers can understand the blast radius first.”
 
 ### Demo command
 
 ```bash
-branch-futures ./sample-repo
+branch-to-the-future ./sample-repo
 ```
 
 ### Change request
@@ -913,7 +913,7 @@ add async resume parsing with S3 upload and status polling
 
 ### Closing line
 
-“Branch Futures helps developers see the blast radius before they ship the blast.”
+“Branch to the Future helps developers see the blast radius before they ship the blast.”
 
 ## 15. Success metrics
 
@@ -975,7 +975,7 @@ Save image to file and open in browser. The TUI is the command center, not the i
 - Export to Notion/Markdown/GitHub issue
 - Watch mode for live repo changes
 - Configurable animation themes
-- `branch-futures replay session.json`
+- `branch-to-the-future replay session.json`
 
 ## 18. Open questions
 
@@ -983,7 +983,7 @@ Save image to file and open in browser. The TUI is the command center, not the i
 2. Should the image artifact be required in the demo or optional?
 3. Should patch skeleton generation be included in MVP or saved for stretch?
 4. Should the app work fully offline with mock mode?
-5. Should “Branch Futures” be the final name or just the internal codename?
+5. Should “Branch to the Future” be the final name or just the internal codename?
 
 ## 19. Recommended MVP scope for hackathon
 
@@ -995,7 +995,7 @@ Build exactly this:
 4. Mock or real repo scanner
 5. GPT-5.5 impact analysis
 6. Animated Impact Explorer
-7. Three Branch Futures comparison
+7. Three Branch to the Future comparison
 8. Test plan + patch plan
 9. GPT Image 2 blueprint generation
 10. Markdown export
@@ -1010,5 +1010,5 @@ Do not build:
 
 ## 20. Final MVP description
 
-Branch Futures is a terminal-native change impact simulator for developers. It lets a developer describe a planned feature or refactor, then scans the repo and animates the exploration of affected files. GPT-5.5 predicts the blast radius, explains why each file is involved, compares multiple implementation paths, and generates a test and patch plan. GPT Image 2 turns the selected future into a shareable visual architecture card. The result is a cinematic developer tool that helps engineers understand what a change will touch before they start coding.
+Branch to the Future is a terminal-native change impact simulator for developers. It lets a developer describe a planned feature or refactor, then scans the repo and animates the exploration of affected files. GPT-5.5 predicts the blast radius, explains why each file is involved, compares multiple implementation paths, and generates a test and patch plan. GPT Image 2 turns the selected future into a shareable visual architecture card. The result is a cinematic developer tool that helps engineers understand what a change will touch before they start coding.
 

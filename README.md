@@ -1,9 +1,9 @@
 <h1>
+  Branch to the Future
   <img src="https://media1.tenor.com/m/cDYTvaH9nlYAAAAd/pixel-art-delorean.gif" width="56" alt="Pixel art DeLorean">
-  Branch Futures
 </h1>
 
-Branch Futures is a terminal-native change impact simulator. You describe a planned code change, it scans a local repository or a GitHub repository link, asks OpenAI for a structured blast-radius analysis, shows the result in a Ratatui TUI, and exports a Markdown report.
+Branch to the Future is a terminal-native change impact simulator. You describe a planned code change, it scans a local repository or a GitHub repository link, asks OpenAI for a structured blast-radius analysis, shows the result in a Ratatui TUI, and exports a Markdown report.
 
 It is not a code generator. It helps you understand what a change may touch before you implement it.
 
@@ -66,10 +66,8 @@ export GITHUB_TOKEN=ghp-your-token-here
 Optional model override:
 
 ```bash
-export BRANCH_FUTURES_MODEL=gpt-5.2
+export BRANCH_TO_THE_FUTURE_MODEL=gpt-5.2
 ```
-
-`BRANCH_FUTURES_MODEL` is still supported as a backwards-compatible fallback.
 
 GitHub authentication uses `git clone --depth 1` with an in-memory HTTP extra header. The token is not written into the clone URL.
 
@@ -93,7 +91,7 @@ At the prompt, enter a change request:
 add async resume parsing with S3 upload and status polling
 ```
 
-Branch Futures will:
+Branch to the Future will:
 
 1. Scan the repository.
 2. Stream OpenAI analysis progress.
@@ -130,7 +128,7 @@ brf https://github.com/NotTanJune/locator
 GitHub links are cloned into a temporary directory under your system temp folder:
 
 ```text
-<temp>/branch-futures-clones/<owner>-<repo>-<uuid>
+<temp>/branch-to-the-future-clones/<owner>-<repo>-<uuid>
 ```
 
 The scan, repo tree, architecture map, and analysis all read from that temp clone. Default report output also points at the clone, so use `--output-dir` for permanent reports:
@@ -247,7 +245,7 @@ T             Open repo tree
 e             Export Markdown
 ```
 
-Ratatui does not control terminal font zoom. Branch Futures uses `Paragraph::scroll((row, col))` for panning and an app-level compact map mode for zoom-out behavior. Compact mode narrows architecture boxes and wraps labels inside them without truncating text.
+Ratatui does not control terminal font zoom. Branch to the Future uses `Paragraph::scroll((row, col))` for panning and an app-level compact map mode for zoom-out behavior. Compact mode narrows architecture boxes and wraps labels inside them without truncating text.
 
 ## What The Screens Show
 
@@ -307,7 +305,7 @@ Export:
 +-------------------------+       +-------------------------+
 | Repo source resolver    | ----> | Temporary GitHub clone  |
 | src/repo_source.rs      |       | git clone --depth 1     |
-| .env GitHub token load  |       | temp/branch-futures.. |
+| .env GitHub token load  |       | temp/branch-to-the-future-clones |
 +-----------+-------------+       +-----------+-------------+
             |                                 |
             +---------------+-----------------+
@@ -346,13 +344,13 @@ Export:
 +-------------------------+
 | Markdown export         |
 | src/artifacts.rs        |
-| branch-futures-report.md|
+| branch-to-the-future-report.md |
 +-------------------------+
 ```
 
 ## Analysis Structure
 
-OpenAI is asked for strict JSON using a schema. Branch Futures then normalizes common model shape variants before typed parsing:
+OpenAI is asked for strict JSON using a schema. Branch to the Future then normalizes common model shape variants before typed parsing:
 
 - camelCase fields such as `impactPath` and `recommendedFuture`
 - string values where arrays are expected
@@ -360,11 +358,11 @@ OpenAI is asked for strict JSON using a schema. Branch Futures then normalizes c
 - numeric strings and `0.0` to `1.0` float scores
 - model-generated architecture stages for any language or framework
 
-If streamed JSON is truncated, Branch Futures retries automatically with a larger output cap, up to `16000` tokens.
+If streamed JSON is truncated, Branch to the Future retries automatically with a larger output cap, up to `16000` tokens.
 
 ## What Gets Scanned
 
-Branch Futures performs shallow multi-language scanning:
+Branch to the Future performs shallow multi-language scanning:
 
 - JavaScript and TypeScript files
 - Python files
@@ -384,7 +382,7 @@ Binary-like assets are skipped. Files over `--max-file-bytes` are skipped. Git i
 Press `e` after analysis to export:
 
 ```text
-<output-dir>/branch-futures-report.md
+<output-dir>/branch-to-the-future-report.md
 ```
 
 The report includes:

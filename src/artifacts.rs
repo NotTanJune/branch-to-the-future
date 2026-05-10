@@ -17,7 +17,7 @@ pub fn export_markdown(
 ) -> Result<PathBuf> {
     let _ = session_id;
     fs::create_dir_all(output_dir)?;
-    let report_path = output_dir.join("branch-futures-report.md");
+    let report_path = output_dir.join("branch-to-the-future-report.md");
     fs::write(
         &report_path,
         render_markdown(change_request, repo_name, analysis, selected_future_index),
@@ -36,7 +36,7 @@ pub fn render_markdown(
         .get(selected_future_index)
         .or_else(|| analysis.futures.first());
     let mut out = String::new();
-    out.push_str("# Branch Futures Report\n\n");
+    out.push_str("# Branch to the Future Report\n\n");
     out.push_str("## Change Request\n\n");
     out.push_str(change_request);
     out.push_str("\n\n## Repo Summary\n\n");
@@ -67,7 +67,7 @@ pub fn render_markdown(
     }
     out.push_str("\n## Risk Summary\n\n");
     list(&mut out, &analysis.risk_summary);
-    out.push_str("\n## Branch Futures\n\n");
+    out.push_str("\n## Branch to the Future\n\n");
     for future in &analysis.futures {
         future_section(&mut out, future);
     }

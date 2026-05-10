@@ -1,4 +1,4 @@
-# Branch Futures Report
+# Branch to the Future Report
 
 ## Change Request
 
@@ -72,7 +72,7 @@ add async resume parsing with S3 upload and status polling
 - File upload validation is already flagged and should be addressed before expanding upload flow.
 - S3 and OpenAI environment-dependent behavior should be mocked in tests.
 
-## Branch Futures
+## Branch to the Future
 
 ### Async S3-backed parsing with polling
 
@@ -209,4 +209,4 @@ Selected export path: Async S3-backed parsing with polling
 
 ## Image Artifact
 
-Architecture diagram: `/Users/nottanjune/Code-Projects/branch-futures/sample-repos/resume-interview/branch-futures-architecture.png`
+Architecture diagram: `/Users/nottanjune/Code-Projects/branch-to-the-future/sample-repos/resume-interview/branch-to-the-future-architecture.png`
