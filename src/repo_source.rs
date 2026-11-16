@@ -6,7 +6,6 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
-use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitHubRepo {
@@ -209,12 +208,28 @@ fn base64_encode(bytes: &[u8]) -> String {
     output
 }
 
+/// Process-unique hex id built from wall-clock nanos, the process id and an
+/// atomic counter. The counter keeps ids distinct for concurrent callers in
+/// one process; the pid and nanos separate processes.
+pub fn unique_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{nanos:x}-{:x}-{count:x}", std::process::id())
+}
+
 fn temp_clone_path(root: &Path, repo: &GitHubRepo) -> PathBuf {
     root.join("branch-to-the-future-clones").join(format!(
         "{}-{}-{}",
         safe_segment(&repo.owner),
         safe_segment(&repo.name),
-        Uuid::new_v4()
+        unique_id()
     ))
 }
 
@@ -232,8 +247,8 @@ fn safe_segment(value: &str) -> String {
 }
 
 fn read_dotenv_value(path: &Path, key: &str) -> Result<Option<String>> {
-    let content = match fs::read_to_string(path) {
-        Ok(content) => content,
+    let content = match fs::read(path) {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
@@ -248,8 +263,9 @@ fn read_dotenv_value(path: &Path, key: &str) -> Result<Option<String>> {
             continue;
         };
         if candidate.trim() == key {
-            if let Some(value) = non_empty(Some(value)) {
-                return Ok(Some(strip_quotes(value).to_string()));
+            let value = parse_dotenv_value(value);
+            if !value.is_empty() {
+                return Ok(Some(value));
             }
         }
     }
@@ -257,19 +273,75 @@ fn read_dotenv_value(path: &Path, key: &str) -> Result<Option<String>> {
     Ok(None)
 }
 
+/// Parses the right-hand side of a `KEY=value` line: quoted values are
+/// unquoted (a trailing comment after the closing quote is ignored); unquoted
+/// values end at the first ` #` or tab-`#`.
+fn parse_dotenv_value(raw: &str) -> String {
+    let raw = raw.trim();
+    if let Some(quote) = raw.chars().next().filter(|c| *c == '"' || *c == '\'') {
+        if let Some(end) = raw[1..].find(quote) {
+            return raw[1..1 + end].to_string();
+        }
+    }
+    let mut end = raw.len();
+    for (index, ch) in raw.char_indices() {
+        if ch == '#' && (index == 0 || raw[..index].ends_with([' ', '\t'])) {
+            end = index;
+            break;
+        }
+    }
+    raw[..end].trim().to_string()
+}
+
 fn non_empty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
-fn strip_quotes(value: &str) -> &str {
-    let value = value.trim();
-    if value.len() >= 2 {
-        let bytes = value.as_bytes();
-        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
-        {
-            return &value[1..value.len() - 1];
-        }
+#[cfg(test)]
+mod dotenv_tests {
+    use super::*;
+
+    fn read(content: &[u8]) -> Option<String> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".env");
+        fs::write(&path, content).unwrap();
+        read_dotenv_value(&path, "KEY").unwrap()
     }
-    value
+
+    #[test]
+    fn strips_inline_comments_and_quotes() {
+        assert_eq!(read(b"KEY=abc # comment\n").as_deref(), Some("abc"));
+        assert_eq!(read(b"KEY=\"abc\" # c\n").as_deref(), Some("abc"));
+        assert_eq!(read(b"KEY='a b' # c\n").as_deref(), Some("a b"));
+        assert_eq!(
+            read(b"export KEY=abc#notacomment\n").as_deref(),
+            Some("abc#notacomment")
+        );
+        assert_eq!(read(b"KEY=\"a # b\"\n").as_deref(), Some("a # b"));
+        assert_eq!(read(b"KEY= # only comment\n"), None);
+    }
+
+    #[test]
+    fn non_utf8_env_file_does_not_abort() {
+        assert_eq!(read(b"BAD=\xff\xfe\nKEY=abc\n").as_deref(), Some("abc"));
+    }
+}
+
+#[cfg(test)]
+mod unique_id_tests {
+    use super::unique_id;
+
+    #[test]
+    fn unique_ids_are_distinct_across_threads() {
+        let handles: Vec<_> = (0..8)
+            .map(|_| std::thread::spawn(|| (0..500).map(|_| unique_id()).collect::<Vec<_>>()))
+            .collect();
+        let mut all = std::collections::HashSet::new();
+        for handle in handles {
+            for id in handle.join().unwrap() {
+                assert!(all.insert(id));
+            }
+        }
+        assert_eq!(all.len(), 4000);
+    }
 }

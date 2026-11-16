@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "tool": "branch-to-the-future",
+  "created_at": "2026-05-10T00:00:00Z",
+  "change_request": "add async resume parsing",
+  "repo_model": {
+    "repo_name": "demo",
+    "root_path": "/tmp/demo",
+    "frameworks": ["nextjs"],
+    "files": [
+      {
+        "path": "app/api/upload/route.ts",
+        "kind": "route",
+        "size": 120,
+        "symbols": ["POST"],
+        "imports": ["parseResume"],
+        "snippets": ["export async function POST()"]
+      },
+      {
+        "path": "workers/parser.ts",
+        "kind": "worker",
+        "size": 80,
+        "symbols": ["parseResume"],
+        "imports": [],
+        "snippets": ["export async function parseResume()"]
+      }
+    ],
+    "routes": [
+      {
+        "path": "app/api/upload/route.ts",
+        "method": "POST",
+        "route": "/api/upload"
+      }
+    ],
+    "tests": [],
+    "config_files": [],
+    "risk_signals": [
+      {
+        "path": "app/api/upload/route.ts",
+        "signal": "handles uploaded content"
+      }
+    ]
+  },
+  "impact_analysis": {
+    "summary": "Move resume parsing behind an asynchronous worker handoff.",
+    "current_architecture": [
+      {
+        "label": "Upload API",
+        "responsibilities": ["accept resume uploads"],
+        "files": ["app/api/upload/route.ts"]
+      }
+    ],
+    "impact_path": [
+      {
+        "path": "app/api/upload/route.ts",
+        "reason": "The route must enqueue work instead of parsing inline.",
+        "impact_score": 90,
+        "confidence": 85,
+        "risk": "medium",
+        "change_needed": "Return a job id and persist upload status."
+      }
+    ],
+    "risk_summary": ["Async state must not lose uploaded resume references."],
+    "tests_to_add": ["POST /api/upload returns a job id"],
+    "futures": [
+      {
+        "name": "Minimal Queue Handoff",
+        "description": "Keep the API route and add a worker-backed queue boundary.",
+        "complexity": "medium",
+        "risk": "medium",
+        "architecture": [
+          {
+            "label": "Upload API",
+            "responsibilities": ["validate upload", "enqueue parser job"],
+            "files": ["app/api/upload/route.ts"]
+          },
+          {
+            "label": "Parser Worker",
+            "responsibilities": ["parse resumes asynchronously"],
+            "files": ["workers/parser.ts"]
+          }
+        ],
+        "affected_files": ["app/api/upload/route.ts", "workers/parser.ts"],
+        "benefits": ["Small change surface"],
+        "drawbacks": ["Polling remains basic"],
+        "patch_plan": ["Add job status persistence", "Move parser call into worker"],
+        "test_plan": ["Assert upload returns job id", "Assert worker records parsed status"]
+      }
+    ],
+    "recommended_future": "Minimal Queue Handoff"
+  },
+  "limits": {
+    "max_file_bytes": 200000,
+    "ignore": [],
+    "max_prompt_files": 80
+  },
+  "model": {
+    "provider": "openai",
+    "name": "gpt-5-mini",
+    "reasoning_effort": "low",
+    "max_output_tokens": 8000
+  },
+  "warnings": []
+}

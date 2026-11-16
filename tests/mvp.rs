@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    env, fs,
     io::{Read, Write},
     net::TcpListener,
     sync::mpsc,
@@ -8,10 +8,16 @@ use std::{
 
 use branch_futures::ai::{parse_impact_analysis, AiStreamEvent, OpenAiClient};
 use branch_futures::artifacts::export_markdown;
-use branch_futures::cli::{resolve_openai_api_key, validate_startup, Cli, ReasoningEffort};
-use branch_futures::domain::{
-    Complexity, ImpactAnalysis, ImplementationFuture, RepoModel, RiskLevel,
+use branch_futures::cli::{
+    resolve_openai_api_key, validate_startup, AnalyzeCommand, Cli, CliCommand, ReasoningEffort,
 };
+use branch_futures::domain::{
+    Complexity, ImpactAnalysis, ImpactFile, ImplementationFuture, RepoModel, RiskLevel,
+};
+use branch_futures::machine::{
+    build_analyze_envelope, build_scan_envelope, run_analyze_json, JsonLimits, JsonModel,
+};
+use branch_futures::notion::NotionParentRef;
 use branch_futures::repo::scan_repo;
 use branch_futures::repo_source::{
     github_authorization_header, github_clone_error_message, prepare_repo_source_with_cloner,
@@ -30,6 +36,8 @@ fn cli_help_names_repo_input_as_path_or_github_url() {
     let help = command.render_help().to_string();
 
     assert!(help.contains("REPO_PATH_OR_GITHUB_URL"));
+    assert!(help.contains("scan"));
+    assert!(help.contains("analyze"));
 }
 
 #[test]
@@ -40,6 +48,81 @@ fn cli_defaults_are_cost_optimized_for_prototyping() {
     assert_eq!(cli.reasoning_effort, ReasoningEffort::Low);
     assert_eq!(cli.max_output_tokens, 8_000);
     assert_eq!(cli.max_prompt_files, 80);
+}
+
+#[test]
+fn scan_json_subcommand_parses_without_openai_key() {
+    let cli = Cli::parse_from(["brf", "scan", "--json", "."]);
+    let Some(CliCommand::Scan(scan)) = cli.command else {
+        panic!("expected scan command");
+    };
+
+    assert!(scan.json);
+    assert_eq!(scan.repo_path, std::path::PathBuf::from("."));
+}
+
+#[test]
+fn blast_subcommand_parses_paths_and_limits() {
+    let cli = Cli::parse_from([
+        "brf",
+        "blast",
+        "--json",
+        ".",
+        "--path",
+        "src/a.rs",
+        "--path",
+        "src/b.rs",
+        "--max-file-bytes",
+        "1000",
+        "--ignore",
+        "vendor",
+    ]);
+    let Some(CliCommand::Blast(blast)) = cli.command else {
+        panic!("expected blast command");
+    };
+    assert!(blast.json);
+    assert_eq!(blast.path, vec!["src/a.rs", "src/b.rs"]);
+    assert_eq!(blast.max_file_bytes, 1000);
+    assert_eq!(blast.ignore, vec!["vendor"]);
+}
+
+#[test]
+fn watch_subcommand_parses_defaults_without_openai_key() {
+    let cli = Cli::parse_from(["brf", "watch", "."]);
+    let Some(CliCommand::Watch(watch)) = cli.command else {
+        panic!("expected watch command");
+    };
+    assert_eq!(watch.repo_path, std::path::PathBuf::from("."));
+    assert_eq!(watch.interval_ms, 1000);
+    assert_eq!(watch.max_file_bytes, 200_000);
+    assert_eq!(watch.text_model, "gpt-5-mini");
+    assert_eq!(watch.max_output_tokens, 8_000);
+    assert_eq!(watch.max_prompt_files, 80);
+
+    let cli = Cli::parse_from(["brf", "watch", ".", "--interval-ms", "250"]);
+    let Some(CliCommand::Watch(watch)) = cli.command else {
+        panic!("expected watch command");
+    };
+    assert_eq!(watch.interval_ms, 250);
+}
+
+#[test]
+fn analyze_json_subcommand_parses_change_request() {
+    let cli = Cli::parse_from([
+        "brf",
+        "analyze",
+        "--json",
+        ".",
+        "--change",
+        "add async resume parsing",
+    ]);
+    let Some(CliCommand::Analyze(analyze)) = cli.command else {
+        panic!("expected analyze command");
+    };
+
+    assert!(analyze.json);
+    assert_eq!(analyze.repo_path, std::path::PathBuf::from("."));
+    assert_eq!(analyze.change, "add async resume parsing");
 }
 
 #[test]
@@ -262,6 +345,42 @@ fn scanner_detects_core_file_kinds_and_respects_ignore() {
 }
 
 #[test]
+fn scanner_ignores_env_files_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join(".env"), "OPENAI_API_KEY=sk-secret\n").unwrap();
+    fs::write(
+        dir.path().join(".env.local"),
+        "DATABASE_URL=postgres://secret\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("backend")).unwrap();
+    fs::write(
+        dir.path().join("backend/.env"),
+        "MONGO_URI=mongodb://secret\n",
+    )
+    .unwrap();
+    fs::write(dir.path().join("backend/.env.example"), "MONGO_URI=\n").unwrap();
+    fs::write(
+        dir.path().join("backend/server.js"),
+        "export function server() {}\n",
+    )
+    .unwrap();
+
+    let model = scan_repo(dir.path(), 200_000, &[]).unwrap();
+
+    assert!(model
+        .files
+        .iter()
+        .any(|file| file.path == "backend/server.js"));
+    for blocked in [".env", ".env.local", "backend/.env", "backend/.env.example"] {
+        assert!(
+            !model.files.iter().any(|file| file.path == blocked),
+            "scanner included secret-bearing env file {blocked}"
+        );
+    }
+}
+
+#[test]
 fn scanner_understands_bundled_resume_interview_sample() {
     let model = scan_repo(
         std::path::Path::new("sample-repos/resume-interview"),
@@ -364,18 +483,211 @@ fn markdown_export_contains_required_sections() {
         "# Branch to the Future Report",
         "## Change Request",
         "## Repo Summary",
+        "## Impact Table",
         "## Impact Path",
         "## Affected Files",
         "## Risk Summary",
+        "## Architecture Stages",
+        "## Evidence",
         "## Branch to the Future",
         "## Recommended Path",
         "## Test Plan",
+        "## Patch Plan",
         "## Patch Skeleton",
         "## Architecture Scaffold",
+        "## JSON Appendix",
     ] {
         assert!(report.contains(heading), "missing {heading}");
     }
     assert!(report.contains("terminal-native layout"));
+}
+
+#[test]
+fn markdown_export_keeps_ten_point_scores_on_ten_point_scale() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut analysis = sample_analysis();
+    analysis.impact_path.push(ImpactFile {
+        path: "app/api/upload/route.ts".to_string(),
+        reason: "entry point".to_string(),
+        impact_score: 70, // stored 0..=100; renders as 7/10
+        confidence: 88,
+        risk: RiskLevel::Medium,
+        change_needed: "return job id".to_string(),
+    });
+
+    let path = export_markdown(
+        dir.path(),
+        "session-1",
+        "add async resume parsing",
+        "sample",
+        &analysis,
+        0,
+    )
+    .unwrap();
+    let report = fs::read_to_string(path).unwrap();
+
+    assert!(report.contains("`app/api/upload/route.ts` (7/10"));
+}
+
+#[test]
+fn notion_parent_refs_parse_refs_raw_ids_and_urls() {
+    let id = "1234567890abcdef1234567890abcdef";
+
+    assert_eq!(
+        "page:12345678-90ab-cdef-1234-567890abcdef"
+            .parse::<NotionParentRef>()
+            .unwrap(),
+        NotionParentRef::Page("12345678-90ab-cdef-1234-567890abcdef".to_string())
+    );
+    assert_eq!(
+        format!("database:{id}").parse::<NotionParentRef>().unwrap(),
+        NotionParentRef::Database("12345678-90ab-cdef-1234-567890abcdef".to_string())
+    );
+    assert_eq!(
+        format!("data-source:{id}")
+            .parse::<NotionParentRef>()
+            .unwrap(),
+        NotionParentRef::DataSource("12345678-90ab-cdef-1234-567890abcdef".to_string())
+    );
+    assert_eq!(
+        id.parse::<NotionParentRef>().unwrap(),
+        NotionParentRef::Page("12345678-90ab-cdef-1234-567890abcdef".to_string())
+    );
+    assert_eq!(
+        "https://www.notion.so/team/Branch-to-the-Future-1234567890abcdef1234567890abcdef?pvs=4"
+            .parse::<NotionParentRef>()
+            .unwrap(),
+        NotionParentRef::Page("12345678-90ab-cdef-1234-567890abcdef".to_string())
+    );
+
+    assert!("database:not-an-id".parse::<NotionParentRef>().is_err());
+}
+
+#[test]
+fn notion_markdown_excludes_html_tables_and_keeps_review_sections() {
+    let analysis = sample_analysis();
+    let report = branch_futures::artifacts::render_notion_markdown(
+        "add async resume parsing",
+        "sample",
+        &analysis,
+        0,
+    );
+
+    for heading in [
+        "# Branch to the Future Report",
+        "## Change Request",
+        "## Repo Summary",
+        "## Impact Path",
+        "## Risk Summary",
+        "## Architecture Stages",
+        "## Evidence",
+        "## Branch to the Future",
+        "## Recommended Path",
+        "## Test Plan",
+        "## Patch Plan",
+    ] {
+        assert!(report.contains(heading), "missing {heading}");
+    }
+    assert!(!report.contains("<table>"));
+    assert!(!report.contains("## JSON Appendix"));
+}
+
+#[test]
+fn json_envelopes_are_versioned_and_stable() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"demo\"\n",
+    )
+    .unwrap();
+    fs::create_dir(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("src/lib.rs"), "pub fn demo() {}\n").unwrap();
+    let repo_model = scan_repo(dir.path(), 200_000, &[]).unwrap();
+
+    let scan = build_scan_envelope(
+        repo_model.clone(),
+        JsonLimits::new(200_000, Vec::new(), None),
+        "2026-05-10T00:00:00Z".to_string(),
+    );
+    assert_eq!(scan.schema_version, 1);
+    assert_eq!(scan.tool, "branch-to-the-future");
+    assert_eq!(scan.change_request, "");
+    assert!(scan.impact_analysis.is_none());
+    assert_eq!(scan.repo_model.files.len(), 2);
+
+    let analyze = build_analyze_envelope(
+        repo_model,
+        sample_analysis(),
+        "add async resume parsing".to_string(),
+        JsonLimits::new(200_000, Vec::new(), Some(80)),
+        JsonModel::openai("gpt-5-mini".to_string(), "low".to_string(), 8_000),
+        "2026-05-10T00:00:00Z".to_string(),
+    );
+    let json = serde_json::to_string(&analyze).unwrap();
+
+    assert!(json.contains("\"schema_version\":1"));
+    assert!(json.contains("\"change_request\":\"add async resume parsing\""));
+    assert!(json.contains("\"impact_analysis\""));
+    assert!(json.contains("\"model\":{\"provider\":\"openai\""));
+}
+
+#[test]
+fn golden_json_fixtures_match_envelope_schema() {
+    for fixture in [
+        include_str!("../fixtures/schema/scan-envelope-v1.json"),
+        include_str!("../fixtures/schema/analyze-envelope-v1.json"),
+    ] {
+        let envelope: branch_futures::machine::JsonEnvelope =
+            serde_json::from_str(fixture).unwrap();
+        assert_eq!(envelope.schema_version, 1);
+        assert_eq!(envelope.tool, "branch-to-the-future");
+    }
+}
+
+#[tokio::test]
+async fn analyze_json_runner_returns_versioned_envelope() {
+    let (url, _bodies_rx) = fake_openai_server();
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{\"dependencies\":{}}\n").unwrap();
+    fs::create_dir_all(dir.path().join("app/api/upload")).unwrap();
+    fs::write(
+        dir.path().join("app/api/upload/route.ts"),
+        "export async function POST() { return Response.json({ ok: true }); }\n",
+    )
+    .unwrap();
+
+    let old_key = env::var_os("OPENAI_API_KEY");
+    let old_base_url = env::var_os("BRANCH_TO_THE_FUTURE_OPENAI_BASE_URL");
+    env::set_var("OPENAI_API_KEY", "sk-test");
+    env::set_var("BRANCH_TO_THE_FUTURE_OPENAI_BASE_URL", url);
+
+    let envelope = run_analyze_json(&AnalyzeCommand {
+        json: true,
+        repo_path: dir.path().to_path_buf(),
+        change: "add async resume parsing".to_string(),
+        max_file_bytes: 200_000,
+        ignore: vec![],
+        text_model: "gpt-5-mini".to_string(),
+        reasoning_effort: ReasoningEffort::Low,
+        max_output_tokens: 8_000,
+        max_prompt_files: 80,
+    })
+    .await
+    .unwrap();
+
+    match old_key {
+        Some(value) => env::set_var("OPENAI_API_KEY", value),
+        None => env::remove_var("OPENAI_API_KEY"),
+    }
+    match old_base_url {
+        Some(value) => env::set_var("BRANCH_TO_THE_FUTURE_OPENAI_BASE_URL", value),
+        None => env::remove_var("BRANCH_TO_THE_FUTURE_OPENAI_BASE_URL"),
+    }
+
+    assert_eq!(envelope.schema_version, 1);
+    assert_eq!(envelope.change_request, "add async resume parsing");
+    assert!(envelope.impact_analysis.is_some());
+    assert_eq!(envelope.model.name.as_deref(), Some("gpt-5-mini"));
 }
 
 #[test]
@@ -669,4 +981,17 @@ fn sample_analysis() -> ImpactAnalysis {
         }],
         recommended_future: "Minimal Patch".to_string(),
     }
+}
+
+#[test]
+fn ten_point_model_scores_are_rescaled_on_parse_and_render_monotonically() {
+    let json = r#"{"summary":"s","currentArchitecture":[],"impactPath":[{"file":"a.rs","reason":"r","impactScore":7,"confidence":90,"risk":"High","changeNeeded":"x"}],"riskSummary":[],"testsToAdd":[],"futures":[],"recommendedFuture":"none"}"#;
+    let analysis = parse_impact_analysis(json).unwrap();
+    assert_eq!(analysis.impact_path[0].impact_score, 70);
+    let integer_one = json.replace("\"impactScore\":7", "\"impactScore\":1");
+    // a lone integer 1 is a ten-point 1/10 (10 stored), not 100%
+    assert_eq!(
+        parse_impact_analysis(&integer_one).unwrap().impact_path[0].impact_score,
+        10
+    );
 }

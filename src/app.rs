@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::fx::EffectManager;
 use anyhow::Result;
 use crossterm::{
     event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers},
@@ -11,16 +12,18 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
-use tachyonfx::EffectManager;
 use tokio::{sync::mpsc, task};
-use uuid::Uuid;
 
 use crate::{
     ai::{AiStreamEvent, OpenAiClient},
-    artifacts::export_markdown,
+    artifacts::render_notion_markdown,
     cli::{Cli, ReasoningEffort},
     domain::{
         AnimationStage, ArchitectureZoom, ImpactAnalysis, ImpactFile, ImpactSort, RepoModel, Screen,
+    },
+    notion::{
+        export_to_notion_with_auth, notion_api_token_from_env, NotionExportAction,
+        NotionExportRequest, NotionParentRef,
     },
     repo::scan_repo,
     repo_source::PreparedRepo,
@@ -57,6 +60,13 @@ pub struct App {
     pub status: String,
     pub error: Option<String>,
     pub export_path: Option<PathBuf>,
+    pub notion_target_input: String,
+    pub notion_page_id: Option<String>,
+    pub notion_page_url: Option<String>,
+    pub notion_export_message: Option<String>,
+    pub notion_export_return_screen: Screen,
+    pub notion_command: PathBuf,
+    pub notion_api_token: Option<String>,
     pub animation_stage: AnimationStage,
     pub trace_revealed: usize,
     pub stream_preview: String,
@@ -75,7 +85,8 @@ enum AppEvent {
 
 impl App {
     pub fn from_cli(cli: Cli, api_key: String) -> Self {
-        let prepared = PreparedRepo::local(cli.repo_path.clone());
+        let prepared =
+            PreparedRepo::local(cli.repo_path.clone().unwrap_or_else(|| PathBuf::from(".")));
         Self::from_prepared_cli(cli, api_key, prepared)
     }
 
@@ -92,7 +103,7 @@ impl App {
             reasoning_effort: cli.reasoning_effort,
             max_output_tokens: cli.max_output_tokens,
             max_prompt_files: cli.max_prompt_files,
-            session_id: Uuid::new_v4().to_string(),
+            session_id: crate::repo_source::unique_id(),
             change_request: String::new(),
             screen: Screen::Input,
             previous_screen: Screen::Input,
@@ -110,6 +121,13 @@ impl App {
             status: "Enter change request".to_string(),
             error: None,
             export_path: None,
+            notion_target_input: String::new(),
+            notion_page_id: None,
+            notion_page_url: None,
+            notion_export_message: None,
+            notion_export_return_screen: Screen::ImpactExplorer,
+            notion_command: PathBuf::from("ntn"),
+            notion_api_token: notion_api_token_from_env(),
             animation_stage: AnimationStage::BootReveal,
             trace_revealed: 0,
             stream_preview: String::new(),
@@ -214,12 +232,18 @@ impl App {
     }
 
     fn handle_key(&mut self, key: KeyEvent, tx: mpsc::UnboundedSender<AppEvent>) -> bool {
-        if matches!(key.code, KeyCode::Char('q')) {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return true;
         }
-        if matches!(key.code, KeyCode::Char('?')) {
-            self.previous_screen = self.screen;
-            self.screen = Screen::Help;
+        let text_input = matches!(self.screen, Screen::Input | Screen::NotionExportPrompt);
+        if !text_input && matches!(key.code, KeyCode::Char('q')) {
+            return true;
+        }
+        if !text_input && matches!(key.code, KeyCode::Char('?')) {
+            if self.screen != Screen::Help {
+                self.previous_screen = self.screen;
+                self.screen = Screen::Help;
+            }
             return false;
         }
         if self.handle_global_analysis_key(&key) {
@@ -234,6 +258,7 @@ impl App {
             Screen::FuturesCompare => self.handle_futures_key(key),
             Screen::RepoTree => self.handle_repo_tree_key(key),
             Screen::ArchitectureScaffold => self.handle_architecture_key(key),
+            Screen::NotionExportPrompt => self.handle_notion_export_key(key),
             Screen::ExportSummary | Screen::Error | Screen::Help => self.handle_modal_key(key),
         }
         false
@@ -291,10 +316,8 @@ impl App {
             KeyCode::Char('g') => self.show_architecture(),
             KeyCode::Char('e') => self.export(),
             KeyCode::Char('s') => self.cycle_impact_sort(),
-            KeyCode::Char('p') => {
-                self.status = "Patch skeleton included in Markdown export".to_string()
-            }
-            KeyCode::Char('t') => self.status = "Test plan included in Markdown export".to_string(),
+            KeyCode::Char('p') => self.status = "Patch plan included in Notion export".to_string(),
+            KeyCode::Char('t') => self.status = "Test plan included in Notion export".to_string(),
             _ => {}
         }
     }
@@ -356,6 +379,26 @@ impl App {
                 self.architecture_scroll_x = 0;
                 self.architecture_scroll_y = 0;
                 self.set_architecture_zoom(ArchitectureZoom::Normal);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_notion_export_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.notion_target_input.clear();
+                self.screen = self.notion_export_return_screen;
+                self.status = "Notion export canceled".to_string();
+            }
+            KeyCode::Enter => self.submit_notion_export(),
+            KeyCode::Backspace => {
+                self.notion_target_input.pop();
+            }
+            KeyCode::Char(c)
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                self.notion_target_input.push(c);
             }
             _ => {}
         }
@@ -540,21 +583,78 @@ impl App {
     }
 
     fn export(&mut self) {
-        let (Some(repo), Some(analysis)) = (&self.repo_model, &self.impact_analysis) else {
+        if self.repo_model.is_none() || self.impact_analysis.is_none() {
             self.status = "No analysis to export yet".to_string();
             return;
+        }
+        self.notion_export_return_screen = self.screen;
+        self.notion_target_input.clear();
+        self.status = if self.notion_page_id.is_some() {
+            "Enter updates current Notion page; type parent ref or URL to create new page"
+                .to_string()
+        } else {
+            "Enter Notion parent ref or URL".to_string()
         };
-        match export_markdown(
-            &self.output_dir,
-            &self.session_id,
+        self.screen = Screen::NotionExportPrompt;
+    }
+
+    fn submit_notion_export(&mut self) {
+        let (Some(repo), Some(analysis)) = (&self.repo_model, &self.impact_analysis) else {
+            self.status = "No analysis to export yet".to_string();
+            self.screen = self.notion_export_return_screen;
+            return;
+        };
+        let input = self.notion_target_input.trim();
+        let markdown = render_notion_markdown(
             &self.change_request,
             &repo.repo_name,
             analysis,
             self.selected_future_index,
+        );
+        let request = if input.is_empty() {
+            let Some(page_id) = self.notion_page_id.clone() else {
+                self.status =
+                    "Enter Notion parent page/database/data-source ref or URL".to_string();
+                return;
+            };
+            NotionExportRequest {
+                parent: None,
+                page_id: Some(page_id),
+                page_url: self.notion_page_url.clone(),
+                markdown,
+            }
+        } else {
+            let parent = match input.parse::<NotionParentRef>() {
+                Ok(parent) => parent,
+                Err(error) => {
+                    self.error = Some(error.to_string());
+                    self.screen = Screen::Error;
+                    return;
+                }
+            };
+            NotionExportRequest {
+                parent: Some(parent),
+                page_id: None,
+                page_url: None,
+                markdown,
+            }
+        };
+
+        match export_to_notion_with_auth(
+            &self.notion_command,
+            self.notion_api_token.as_deref(),
+            request,
         ) {
-            Ok(path) => {
-                self.export_path = Some(path.clone());
-                self.status = format!("Exported {}", path.display());
+            Ok(result) => {
+                self.notion_page_id = Some(result.page_id);
+                self.notion_page_url = Some(result.page_url.clone());
+                let action = match result.action {
+                    NotionExportAction::Created => "Created",
+                    NotionExportAction::Updated => "Updated",
+                };
+                self.notion_export_message = Some(format!("{action} Notion page"));
+                self.status = format!("{action} Notion page {}", result.page_url);
+                self.notion_target_input.clear();
                 self.screen = Screen::ExportSummary;
             }
             Err(error) => {
@@ -605,9 +705,9 @@ impl App {
             return;
         }
         self.stream_preview.push_str(delta);
-        if self.stream_preview.len() > 900 {
-            let start = self.stream_preview.len().saturating_sub(900);
-            self.stream_preview = self.stream_preview[start..].to_string();
+        let char_count = self.stream_preview.chars().count();
+        if char_count > 900 {
+            self.stream_preview = self.stream_preview.chars().skip(char_count - 900).collect();
         }
     }
 
@@ -669,12 +769,12 @@ impl App {
     }
 }
 
+/// Stored impact scores are on a 0..=100 scale. `parse_impact_analysis` rescales
+/// whole-analysis ten-point model output (every score <= 10) to 0..=100 on
+/// ingestion, so rendering is always `round(score / 10)`. One rule for every
+/// value keeps the mapping monotonic (11 renders 1, never below 10 renders 10).
 pub fn impact_score_out_of_10(score: u8) -> u8 {
-    if score <= 10 {
-        score
-    } else {
-        ((score as f32 / 10.0).round() as u8).clamp(0, 10)
-    }
+    ((score as f32 / 10.0).round() as u8).clamp(0, 10)
 }
 
 trait ThenSend<T> {
@@ -750,6 +850,12 @@ fn architecture_shortcut_active(screen: Screen) -> bool {
 mod tests {
     use super::*;
 
+    use std::{
+        fs,
+        os::unix::fs::PermissionsExt,
+        path::{Path, PathBuf},
+    };
+
     use crate::domain::{
         ArchitectureZoom, Complexity, FileKind, ImpactFile, ImpactSort, ImplementationFuture,
         RepoFile, RepoModel, RiskLevel,
@@ -758,7 +864,9 @@ mod tests {
     fn app() -> App {
         let dir = tempfile::tempdir().unwrap();
         let cli = Cli::parse_from(["brf", dir.path().to_str().unwrap()]);
-        App::from_cli(cli, "test-key".to_string())
+        let mut app = App::from_cli(cli, "test-key".to_string());
+        app.notion_api_token = None;
+        app
     }
 
     fn analysis() -> ImpactAnalysis {
@@ -797,7 +905,7 @@ mod tests {
             ImpactFile {
                 path: "low.ts".to_string(),
                 reason: "low".to_string(),
-                impact_score: 3,
+                impact_score: 30,
                 confidence: 90,
                 risk: RiskLevel::Low,
                 change_needed: "small change".to_string(),
@@ -805,7 +913,7 @@ mod tests {
             ImpactFile {
                 path: "high.ts".to_string(),
                 reason: "high".to_string(),
-                impact_score: 10,
+                impact_score: 100,
                 confidence: 90,
                 risk: RiskLevel::High,
                 change_needed: "large change".to_string(),
@@ -813,7 +921,7 @@ mod tests {
             ImpactFile {
                 path: "mid.ts".to_string(),
                 reason: "mid".to_string(),
-                impact_score: 7,
+                impact_score: 70,
                 confidence: 90,
                 risk: RiskLevel::Medium,
                 change_needed: "medium change".to_string(),
@@ -854,6 +962,29 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn mock_ntn(dir: &Path) -> PathBuf {
+        let script = dir.join("ntn");
+        let script_body = format!(
+            r#"#!/bin/sh
+printf '%s\n' "$@" > '{args}'
+printf '%s\n' "$NOTION_API_TOKEN" > '{token}'
+cat > '{stdin}'
+case "$*" in
+  *"/markdown"*) printf '%s\n' '{{"object":"page_markdown","id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","markdown":"ok","truncated":false,"unknown_block_ids":[]}}' ;;
+  *) printf '%s\n' '{{"object":"page","id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","url":"https://www.notion.so/Branch-aaaaaaaaaaaaaaaabbbbccccddddeeee"}}' ;;
+esac
+"#,
+            args = dir.join("args").display(),
+            token = dir.join("token").display(),
+            stdin = dir.join("stdin.json").display()
+        );
+        fs::write(&script, script_body).unwrap();
+        let mut permissions = fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).unwrap();
+        script
     }
 
     #[test]
@@ -1095,5 +1226,256 @@ mod tests {
 
         app.handle_key(key(KeyCode::Esc), tx);
         assert_eq!(app.screen, Screen::RepoTree);
+    }
+
+    #[test]
+    fn e_opens_notion_export_prompt_from_analysis_screens() {
+        for source_screen in [
+            Screen::ImpactExplorer,
+            Screen::FuturesCompare,
+            Screen::RepoTree,
+            Screen::ArchitectureScaffold,
+        ] {
+            let mut app = app();
+            let (tx, _rx) = mpsc::unbounded_channel();
+            app.repo_model = Some(repo_model());
+            app.impact_analysis = Some(analysis());
+            app.screen = source_screen;
+
+            app.handle_key(key(KeyCode::Char('e')), tx);
+
+            assert_eq!(app.screen, Screen::NotionExportPrompt);
+            assert_eq!(app.notion_export_return_screen, source_screen);
+        }
+    }
+
+    #[test]
+    fn notion_prompt_escape_returns_to_previous_analysis_screen() {
+        let mut app = app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.repo_model = Some(repo_model());
+        app.impact_analysis = Some(analysis());
+        app.screen = Screen::ArchitectureScaffold;
+
+        app.handle_key(key(KeyCode::Char('e')), tx.clone());
+        app.handle_key(key(KeyCode::Esc), tx);
+
+        assert_eq!(app.screen, Screen::ArchitectureScaffold);
+        assert!(app.notion_target_input.is_empty());
+    }
+
+    #[test]
+    fn first_notion_export_creates_page_from_parent_ref() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.repo_model = Some(repo_model());
+        app.impact_analysis = Some(analysis());
+        app.notion_command = mock_ntn(dir.path());
+        app.screen = Screen::ImpactExplorer;
+
+        app.handle_key(key(KeyCode::Char('e')), tx.clone());
+        app.notion_target_input = "page:1234567890abcdef1234567890abcdef".to_string();
+        app.handle_key(key(KeyCode::Enter), tx);
+
+        assert_eq!(app.screen, Screen::ExportSummary);
+        assert_eq!(
+            app.notion_page_id.as_deref(),
+            Some("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        );
+        assert_eq!(
+            app.notion_page_url.as_deref(),
+            Some("https://www.notion.so/Branch-aaaaaaaaaaaaaaaabbbbccccddddeeee")
+        );
+        assert!(app.status.contains("Created Notion page"));
+        assert_eq!(
+            fs::read_to_string(dir.path().join("args")).unwrap(),
+            "api\nv1/pages\n"
+        );
+        let body: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.path().join("stdin.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            body["parent"]["page_id"],
+            "12345678-90ab-cdef-1234-567890abcdef"
+        );
+        assert!(body["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("## Impact Path"));
+    }
+
+    #[test]
+    fn later_empty_notion_export_updates_same_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.repo_model = Some(repo_model());
+        app.impact_analysis = Some(analysis());
+        app.notion_command = mock_ntn(dir.path());
+        app.notion_page_id = Some("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".to_string());
+        app.notion_page_url =
+            Some("https://www.notion.so/Branch-aaaaaaaaaaaaaaaabbbbccccddddeeee".to_string());
+        app.screen = Screen::FuturesCompare;
+
+        app.handle_key(key(KeyCode::Char('e')), tx.clone());
+        app.handle_key(key(KeyCode::Enter), tx);
+
+        assert_eq!(app.screen, Screen::ExportSummary);
+        assert!(app.status.contains("Updated Notion page"));
+        assert_eq!(
+            fs::read_to_string(dir.path().join("args")).unwrap(),
+            "api\nv1/pages/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/markdown\n-X\nPATCH\n"
+        );
+        let body: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.path().join("stdin.json")).unwrap())
+                .unwrap();
+        assert_eq!(body["type"], "replace_content");
+        assert!(body["replace_content"]["new_str"]
+            .as_str()
+            .unwrap()
+            .contains("# Branch to the Future Report"));
+        assert!(body["replace_content"]["allow_deleting_content"].is_null());
+    }
+
+    #[test]
+    fn typed_parent_ref_after_existing_page_creates_new_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.repo_model = Some(repo_model());
+        app.impact_analysis = Some(analysis());
+        app.notion_command = mock_ntn(dir.path());
+        app.notion_page_id = Some("11111111-2222-3333-4444-555555555555".to_string());
+        app.screen = Screen::ImpactExplorer;
+
+        app.handle_key(key(KeyCode::Char('e')), tx.clone());
+        app.notion_target_input = "data-source:1234567890abcdef1234567890abcdef".to_string();
+        app.handle_key(key(KeyCode::Enter), tx);
+
+        assert_eq!(app.screen, Screen::ExportSummary);
+        assert!(app.status.contains("Created Notion page"));
+        assert_eq!(
+            fs::read_to_string(dir.path().join("args")).unwrap(),
+            "api\nv1/pages\n"
+        );
+        let body: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.path().join("stdin.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            body["parent"]["data_source_id"],
+            "12345678-90ab-cdef-1234-567890abcdef"
+        );
+    }
+
+    #[test]
+    fn missing_ntn_surfaces_setup_help() {
+        let mut app = app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.repo_model = Some(repo_model());
+        app.impact_analysis = Some(analysis());
+        app.notion_command = PathBuf::from("/missing/ntn");
+        app.screen = Screen::ImpactExplorer;
+
+        app.handle_key(key(KeyCode::Char('e')), tx.clone());
+        app.notion_target_input = "page:1234567890abcdef1234567890abcdef".to_string();
+        app.handle_key(key(KeyCode::Enter), tx);
+
+        assert_eq!(app.screen, Screen::Error);
+        let error = app.error.as_deref().unwrap();
+        assert!(error.contains("curl -fsSL https://ntn.dev | bash"));
+        assert!(error.contains("ntn login"));
+    }
+
+    #[test]
+    fn notion_export_uses_api_token_without_ntn_login() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.repo_model = Some(repo_model());
+        app.impact_analysis = Some(analysis());
+        app.notion_command = mock_ntn(dir.path());
+        app.notion_api_token = Some("secret-token".to_string());
+        app.screen = Screen::ImpactExplorer;
+
+        app.handle_key(key(KeyCode::Char('e')), tx.clone());
+        app.notion_target_input = "page:1234567890abcdef1234567890abcdef".to_string();
+        app.handle_key(key(KeyCode::Enter), tx);
+
+        assert_eq!(app.screen, Screen::ExportSummary);
+        assert!(app.status.contains("Created Notion page"));
+        assert_eq!(
+            fs::read_to_string(dir.path().join("args")).unwrap(),
+            "api\nv1/pages\n"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("token")).unwrap(),
+            "secret-token\n"
+        );
+    }
+
+    #[test]
+    fn q_and_question_mark_are_text_on_input_screens() {
+        let mut app = app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.screen = Screen::Input;
+        assert!(!app.handle_key(key(KeyCode::Char('q')), tx.clone()));
+        assert!(!app.handle_key(key(KeyCode::Char('?')), tx.clone()));
+        assert_eq!(app.change_request, "q?");
+        assert_eq!(app.screen, Screen::Input);
+
+        app.screen = Screen::NotionExportPrompt;
+        assert!(!app.handle_key(key(KeyCode::Char('q')), tx.clone()));
+        assert!(!app.handle_key(key(KeyCode::Char('?')), tx));
+        assert_eq!(app.notion_target_input, "q?");
+        assert_eq!(app.screen, Screen::NotionExportPrompt);
+    }
+
+    #[test]
+    fn ctrl_c_quits_and_q_quits_outside_text_screens() {
+        let mut app = app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(app.handle_key(ctrl_c, tx.clone()));
+        app.screen = Screen::ImpactExplorer;
+        assert!(app.handle_key(key(KeyCode::Char('q')), tx));
+    }
+
+    #[test]
+    fn second_question_mark_on_help_does_not_trap_user() {
+        let mut app = app();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.screen = Screen::ImpactExplorer;
+        app.handle_key(key(KeyCode::Char('?')), tx.clone());
+        assert_eq!(app.screen, Screen::Help);
+        app.handle_key(key(KeyCode::Char('?')), tx.clone());
+        assert_eq!(app.previous_screen, Screen::ImpactExplorer);
+        app.handle_key(key(KeyCode::Esc), tx);
+        assert_eq!(app.screen, Screen::ImpactExplorer);
+    }
+
+    #[test]
+    fn stream_preview_trims_on_char_boundary() {
+        let mut app = app();
+        app.push_stream_delta(&"漢".repeat(1000));
+        assert_eq!(app.stream_preview.chars().count(), 900);
+        app.push_stream_delta("x");
+        assert_eq!(app.stream_preview.chars().count(), 900);
+    }
+
+    #[test]
+    fn score_out_of_10_is_monotonic() {
+        let mut last = 0;
+        for score in 0..=100u8 {
+            let rendered = impact_score_out_of_10(score);
+            assert!(
+                rendered >= last,
+                "score {score} rendered {rendered} < {last}"
+            );
+            last = rendered;
+        }
+        assert_eq!(impact_score_out_of_10(11), 1);
+        assert_eq!(impact_score_out_of_10(70), 7);
+        assert_eq!(impact_score_out_of_10(100), 10);
     }
 }

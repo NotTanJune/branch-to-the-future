@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use futures_util::StreamExt;
-use reqwest::Client;
+use std::io::Read;
+
 use serde_json::{json, Map, Value};
+use tokio::sync::mpsc;
 
 use crate::{
     cli::ReasoningEffort,
@@ -21,7 +22,7 @@ const MAX_SNIPPET_CHARS: usize = 140;
 
 #[derive(Clone)]
 pub struct OpenAiClient {
-    client: Client,
+    client: ureq::Agent,
     api_key: String,
     base_url: String,
     model: String,
@@ -144,20 +145,24 @@ impl OpenAiClient {
     }
 
     async fn send(&self, body: Value) -> Result<String> {
-        let response = self
-            .client
-            .post(&self.base_url)
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .await
-            .context("OpenAI request failed")?;
-        let status = response.status();
-        let value: Value = response
-            .json()
-            .await
+        let client = self.client.clone();
+        let url = self.base_url.clone();
+        let api_key = self.api_key.clone();
+        let (status, text) = tokio::task::spawn_blocking(move || -> Result<(u16, String)> {
+            let mut response =
+                post_json(&client, &url, &api_key, &body).context("OpenAI request failed")?;
+            let status = response.status().as_u16();
+            let text = response
+                .body_mut()
+                .read_to_string()
+                .with_context(|| format!("OpenAI response body unreadable, status {status}"))?;
+            Ok((status, text))
+        })
+        .await
+        .context("OpenAI request task failed")??;
+        let value: Value = serde_json::from_str(&text)
             .with_context(|| format!("OpenAI response was not JSON, status {status}"))?;
-        if !status.is_success() {
+        if !(200..300).contains(&status) {
             return Err(anyhow!("OpenAI API error {status}: {value}"));
         }
         extract_response_text(&value)
@@ -168,38 +173,48 @@ impl OpenAiClient {
     where
         F: FnMut(AiStreamEvent),
     {
-        let response = self
-            .client
-            .post(&self.base_url)
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .await
-            .context("OpenAI streaming request failed")?;
-        let status = response.status();
-        if !status.is_success() {
-            let value: Value = response
-                .json()
-                .await
-                .unwrap_or_else(|_| json!({"error":"OpenAI error body was not JSON"}));
-            return Err(anyhow!("OpenAI API error {status}: {value}"));
-        }
+        let client = self.client.clone();
+        let url = self.base_url.clone();
+        let api_key = self.api_key.clone();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let worker = tokio::task::spawn_blocking(move || -> Result<()> {
+            let mut response = post_json(&client, &url, &api_key, &body)
+                .context("OpenAI streaming request failed")?;
+            let status = response.status().as_u16();
+            if !(200..300).contains(&status) {
+                let text = response.body_mut().read_to_string().unwrap_or_default();
+                let value: Value = serde_json::from_str(&text)
+                    .unwrap_or_else(|_| json!({"error":"OpenAI error body was not JSON"}));
+                return Err(anyhow!("OpenAI API error {status}: {value}"));
+            }
+            let mut reader = response.into_body().into_reader();
+            let mut buf = [0u8; 8192];
+            loop {
+                let n = reader
+                    .read(&mut buf)
+                    .context("OpenAI streaming chunk failed")?;
+                if n == 0 {
+                    return Ok(());
+                }
+                if tx.send(buf[..n].to_vec()).is_err() {
+                    return Ok(());
+                }
+            }
+        });
 
-        let mut stream = response.bytes_stream();
-        let mut pending = String::new();
+        let mut pending: Vec<u8> = Vec::new();
         let mut output = String::new();
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.context("OpenAI streaming chunk failed")?;
-            pending.push_str(&String::from_utf8_lossy(&chunk));
-            while let Some(index) = pending.find("\n\n") {
-                let block = pending[..index].to_string();
-                pending = pending[index + 2..].to_string();
+        while let Some(chunk) = rx.recv().await {
+            pending.extend_from_slice(&chunk);
+            for block in drain_sse_events(&mut pending) {
                 handle_sse_block(&block, &mut output, on_event)?;
             }
         }
-        if !pending.trim().is_empty() {
-            handle_sse_block(&pending, &mut output, on_event)?;
+        worker.await.context("OpenAI streaming task failed")??;
+        let rest = String::from_utf8_lossy(&pending);
+        if !rest.trim().is_empty() {
+            handle_sse_block(&rest, &mut output, on_event)?;
         }
 
         if output.trim().is_empty() {
@@ -215,7 +230,21 @@ pub fn parse_impact_analysis(text: &str) -> Result<ImpactAnalysis> {
     let mut value =
         serde_json::from_str::<Value>(json_text).context("invalid impact analysis JSON syntax")?;
     normalize_impact_analysis(&mut value);
-    serde_json::from_value::<ImpactAnalysis>(value).context("invalid impact analysis JSON")
+    let mut analysis =
+        serde_json::from_value::<ImpactAnalysis>(value).context("invalid impact analysis JSON")?;
+    rescale_ten_point_scores(&mut analysis);
+    Ok(analysis)
+}
+
+/// Stored impact scores are 0..=100. If every score in the analysis is at most
+/// 10, the model used a ten-point scale (`7` meaning 7/10), so scale to 0..=100.
+fn rescale_ten_point_scores(analysis: &mut ImpactAnalysis) {
+    let max = analysis.impact_path.iter().map(|f| f.impact_score).max();
+    if matches!(max, Some(1..=10)) {
+        for file in &mut analysis.impact_path {
+            file.impact_score *= 10;
+        }
+    }
 }
 
 fn normalize_impact_analysis(value: &mut Value) {
@@ -406,8 +435,7 @@ fn corrective_prompt(user_prompt: &str, first_error: &anyhow::Error) -> String {
 fn retry_output_tokens(current: u32) -> u32 {
     current
         .saturating_mul(2)
-        .max(DEFAULT_MAX_OUTPUT_TOKENS)
-        .min(MAX_RETRY_OUTPUT_TOKENS)
+        .clamp(DEFAULT_MAX_OUTPUT_TOKENS, MAX_RETRY_OUTPUT_TOKENS)
 }
 
 fn build_user_prompt(
@@ -468,8 +496,8 @@ fn compact_repo_model(repo_model: &RepoModel, max_prompt_files: usize) -> RepoMo
         file.imports.truncate(MAX_IMPORTS_PER_FILE);
         file.snippets.truncate(MAX_SNIPPETS_PER_FILE);
         for snippet in &mut file.snippets {
-            if snippet.len() > MAX_SNIPPET_CHARS {
-                snippet.truncate(MAX_SNIPPET_CHARS);
+            if let Some((byte_index, _)) = snippet.char_indices().nth(MAX_SNIPPET_CHARS) {
+                snippet.truncate(byte_index);
             }
         }
     }
@@ -501,12 +529,28 @@ fn file_priority(file: &RepoFile) -> (u8, &str) {
     (kind_priority, file.path.as_str())
 }
 
-fn build_http_client() -> Client {
-    Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(180))
+fn build_http_client() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .timeout_global(Some(Duration::from_secs(180)))
+        .http_status_as_error(false)
         .build()
-        .unwrap_or_else(|_| Client::new())
+        .into()
+}
+
+fn post_json(
+    client: &ureq::Agent,
+    url: &str,
+    api_key: &str,
+    body: &Value,
+) -> Result<ureq::http::Response<ureq::Body>> {
+    let payload = serde_json::to_vec(body)?;
+    client
+        .post(url)
+        .header("authorization", format!("Bearer {api_key}"))
+        .header("content-type", "application/json")
+        .send(&payload[..])
+        .map_err(|error| anyhow!("{error}"))
 }
 
 fn impact_schema() -> Value {
@@ -621,6 +665,31 @@ fn extract_json_object(text: &str) -> Option<&str> {
     }
 }
 
+/// Removes every complete SSE event (terminated by `\n\n` or `\r\n\r\n`) from
+/// `pending` and returns them decoded. Bytes are only decoded once an event is
+/// complete, so multibyte characters split across network chunks stay intact.
+fn drain_sse_events(pending: &mut Vec<u8>) -> Vec<String> {
+    let mut events = Vec::new();
+    loop {
+        let lf = find_subslice(pending, b"\n\n").map(|i| (i, 2));
+        let crlf = find_subslice(pending, b"\r\n\r\n").map(|i| (i, 4));
+        let next = match (lf, crlf) {
+            (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
+            (a, b) => a.or(b),
+        };
+        let Some((index, len)) = next else {
+            break;
+        };
+        events.push(String::from_utf8_lossy(&pending[..index]).into_owned());
+        pending.drain(..index + len);
+    }
+    events
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
 fn handle_sse_block<F>(block: &str, output: &mut String, on_event: &mut F) -> Result<()>
 where
     F: FnMut(AiStreamEvent),
@@ -663,4 +732,78 @@ where
         _ => {}
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod regress_tests {
+    use super::*;
+
+    #[test]
+    fn compact_repo_model_truncates_multibyte_snippets_by_chars() {
+        let model = RepoModel {
+            repo_name: "r".into(),
+            root_path: ".".into(),
+            frameworks: vec![],
+            files: vec![RepoFile {
+                path: "a.rs".into(),
+                kind: FileKind::Rust,
+                size: 1,
+                symbols: vec![],
+                imports: vec![],
+                snippets: vec!["漢".repeat(300)],
+            }],
+            routes: vec![],
+            tests: vec![],
+            config_files: vec![],
+            risk_signals: vec![],
+        };
+        let compact = compact_repo_model(&model, 10);
+        assert_eq!(
+            compact.files[0].snippets[0].chars().count(),
+            MAX_SNIPPET_CHARS
+        );
+    }
+
+    #[test]
+    fn sse_multibyte_char_split_across_chunks_is_preserved() {
+        let event = "data: {\"d\":\"漢字\"}\n\n".as_bytes();
+        let split = event.iter().position(|b| *b == 0xE6).unwrap() + 1;
+        let mut pending = Vec::new();
+        pending.extend_from_slice(&event[..split]);
+        assert!(drain_sse_events(&mut pending).is_empty());
+        pending.extend_from_slice(&event[split..]);
+        let events = drain_sse_events(&mut pending);
+        assert_eq!(events, vec!["data: {\"d\":\"漢字\"}".to_string()]);
+        assert!(!events[0].contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn sse_splits_crlf_and_lf_events() {
+        let mut pending = b"data: {\"a\":1}\r\n\r\ndata: {\"b\":2}\n\ndata: part".to_vec();
+        let events = drain_sse_events(&mut pending);
+        assert_eq!(events, vec!["data: {\"a\":1}", "data: {\"b\":2}"]);
+        assert_eq!(pending, b"data: part");
+    }
+
+    #[test]
+    fn crlf_stream_events_are_handled() {
+        let mut output = String::new();
+        let mut seen = Vec::new();
+        let mut pending =
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\r\n\r\n".to_vec();
+        for block in drain_sse_events(&mut pending) {
+            handle_sse_block(&block, &mut output, &mut |e| seen.push(e)).unwrap();
+        }
+        assert_eq!(output, "hi");
+    }
+
+    #[test]
+    fn ten_point_analysis_scores_are_rescaled_once() {
+        let json = r#"{"summary":"s","currentArchitecture":[],"impactPath":[{"file":"a","reason":"r","impactScore":7,"confidence":9,"risk":"High","changeNeeded":"x"}],"riskSummary":[],"testsToAdd":[],"futures":[],"recommendedFuture":"none"}"#;
+        let analysis = parse_impact_analysis(json).unwrap();
+        assert_eq!(analysis.impact_path[0].impact_score, 70);
+        let json = json.replace("\"impactScore\":7", "\"impactScore\":82");
+        let analysis = parse_impact_analysis(&json).unwrap();
+        assert_eq!(analysis.impact_path[0].impact_score, 82);
+    }
 }

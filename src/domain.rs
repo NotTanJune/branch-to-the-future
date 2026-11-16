@@ -161,6 +161,7 @@ pub enum Screen {
     FuturesCompare,
     RepoTree,
     ArchitectureScaffold,
+    NotionExportPrompt,
     ExportSummary,
     Error,
     Help,
@@ -244,23 +245,64 @@ where
     D: Deserializer<'de>,
 {
     let value = serde_json::Value::deserialize(deserializer)?;
-    let number = match value {
-        serde_json::Value::Number(n) => n
-            .as_f64()
-            .ok_or_else(|| de::Error::custom("score must be numeric"))?,
-        serde_json::Value::String(s) => s
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| de::Error::custom("score string must be numeric"))?,
+    // JSON integers (and integer-looking strings) are taken as-is. Only values
+    // written as floats in 0.0..=1.0 are treated as fractions and scaled to 0..=100.
+    let (number, written_as_float) = match value {
+        serde_json::Value::Number(n) => (
+            n.as_f64()
+                .ok_or_else(|| de::Error::custom("score must be numeric"))?,
+            n.is_f64(),
+        ),
+        serde_json::Value::String(s) => {
+            let trimmed = s.trim();
+            (
+                trimmed
+                    .parse::<f64>()
+                    .map_err(|_| de::Error::custom("score string must be numeric"))?,
+                trimmed.contains('.'),
+            )
+        }
         _ => return Err(de::Error::custom("score must be number or numeric string")),
     };
     if !number.is_finite() {
         return Err(de::Error::custom("score must be finite"));
     }
-    let normalized = if (0.0..=1.0).contains(&number) {
+    let normalized = if written_as_float && (0.0..=1.0).contains(&number) {
         number * 100.0
     } else {
         number
     };
     Ok(normalized.clamp(0.0, 100.0).round() as u8)
+}
+
+#[cfg(test)]
+mod score_tests {
+    use super::*;
+
+    #[derive(Deserialize)]
+    struct S {
+        #[serde(deserialize_with = "score")]
+        v: u8,
+    }
+
+    fn parse(json: &str) -> u8 {
+        serde_json::from_str::<S>(json).unwrap().v
+    }
+
+    #[test]
+    fn integer_scores_are_not_scaled_as_fractions() {
+        assert_eq!(parse(r#"{"v":1}"#), 1);
+        assert_eq!(parse(r#"{"v":0}"#), 0);
+        assert_eq!(parse(r#"{"v":"1"}"#), 1);
+        assert_eq!(parse(r#"{"v":7}"#), 7);
+        assert_eq!(parse(r#"{"v":82}"#), 82);
+    }
+
+    #[test]
+    fn float_fractions_are_scaled() {
+        assert_eq!(parse(r#"{"v":0.5}"#), 50);
+        assert_eq!(parse(r#"{"v":0.82}"#), 82);
+        assert_eq!(parse(r#"{"v":1.0}"#), 100);
+        assert_eq!(parse(r#"{"v":"0.91"}"#), 91);
+    }
 }

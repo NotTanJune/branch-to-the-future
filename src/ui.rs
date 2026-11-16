@@ -1,5 +1,6 @@
 use std::{collections::BTreeSet, time::Duration as StdDuration};
 
+use crate::fx::FxDuration;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
@@ -7,7 +8,6 @@ use ratatui::{
     widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Wrap},
     Frame,
 };
-use tachyonfx::Duration as FxDuration;
 
 use crate::{
     app::{impact_score_out_of_10, App},
@@ -29,6 +29,7 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App, frame_delta: StdDuration) {
         Screen::FuturesCompare => render_futures(frame, app),
         Screen::RepoTree => render_repo_tree_screen(frame, app),
         Screen::ArchitectureScaffold => render_architecture(frame, app),
+        Screen::NotionExportPrompt => render_notion_export_prompt(frame, app),
         Screen::ExportSummary => render_export(frame, app),
         Screen::Error => render_error(frame, app),
         Screen::Help => render_help(frame, app),
@@ -499,22 +500,52 @@ fn render_future_detail(frame: &mut Frame<'_>, future: Option<&ImplementationFut
 }
 
 fn render_export(frame: &mut Frame<'_>, app: &App) {
-    let path = app
-        .export_path
-        .as_ref()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "No export path".to_string());
+    let title = app
+        .notion_export_message
+        .as_deref()
+        .unwrap_or("Notion export complete");
+    let page_url = app
+        .notion_page_url
+        .as_deref()
+        .unwrap_or("No Notion page URL");
     frame.render_widget(
         panel(
             "Export Summary",
             vec![
-                Line::from("Markdown report written").green().bold(),
-                Line::from(path),
+                Line::from(title).green().bold(),
+                Line::from(page_url),
                 Line::from(""),
                 Line::from(key_hints(Screen::ExportSummary)).dark_gray(),
             ],
         ),
         centered(frame.area(), 88, 10),
+    );
+}
+
+fn render_notion_export_prompt(frame: &mut Frame<'_>, app: &App) {
+    let cursor = if app.cursor_visible { "█" } else { " " };
+    let input = format!("{}{}", app.notion_target_input, cursor);
+    let mut text = vec![Line::from("Notion export").green().bold(), Line::from("")];
+    if let Some(url) = app.notion_page_url.as_deref() {
+        text.push(Line::from("Enter updates current page.").dark_gray());
+        text.push(Line::from(url).dark_gray());
+        text.push(Line::from(
+            "Type parent ref or URL to create a new page instead.",
+        ));
+    } else {
+        text.push(Line::from(
+            "Enter parent page/database/data-source ref or URL.",
+        ));
+        text.push(Line::from("Examples: page:<id>, database:<id>, data-source:<id>").dark_gray());
+    }
+    text.push(Line::from(""));
+    text.push(Line::from(input).yellow());
+    text.push(Line::from(""));
+    text.push(Line::from(key_hints(Screen::NotionExportPrompt)).dark_gray());
+
+    frame.render_widget(
+        panel("Export to Notion", text),
+        centered(frame.area(), 92, 14),
     );
 }
 
@@ -546,7 +577,7 @@ fn render_help(frame: &mut Frame<'_>, _app: &App) {
                 Line::from("t test plan status"),
                 Line::from("s change impact sort"),
                 Line::from("T repo tree"),
-                Line::from("e export Markdown"),
+                Line::from("e export to Notion"),
                 Line::from("g architecture"),
                 Line::from(""),
                 Line::from(key_hints(Screen::Help)).dark_gray(),
@@ -558,7 +589,7 @@ fn render_help(frame: &mut Frame<'_>, _app: &App) {
 
 fn key_hints(screen: Screen) -> &'static str {
     match screen {
-        Screen::Input => "Enter scan | ? help | q quit",
+        Screen::Input => "Enter scan | Ctrl-C quit",
         Screen::RepoScan => "? help | q quit",
         Screen::ImpactExplorer => {
             "j/k select | Enter inspect | s sort | Tab futures | T repo tree | g architecture | e export | ? help | q quit"
@@ -573,6 +604,7 @@ fn key_hints(screen: Screen) -> &'static str {
         Screen::ArchitectureScaffold => {
             "h/j/k/l pan | arrows pan | -/+ zoom | 0 reset | Esc back | T repo tree | e export | ? help | q quit"
         }
+        Screen::NotionExportPrompt => "Enter export | Esc cancel | Ctrl-C quit",
         Screen::ExportSummary => "Enter/Esc back | q quit",
         Screen::Error => "r retry | Enter/Esc input | q quit",
         Screen::Help => "Enter/Esc back | q quit",
@@ -637,6 +669,7 @@ fn fx_area_for_screen(area: Rect, screen: Screen, stage: AnimationStage) -> Rect
         Screen::RepoTree => area,
         Screen::ArchitectureScaffold => architecture_fx_area(area),
         Screen::FileDetail => centered(area, 88, 18),
+        Screen::NotionExportPrompt => centered(area, 92, 14),
         Screen::ExportSummary => centered(area, 88, 10),
         Screen::Error => centered(area, 88, 12),
         Screen::Help => centered(area, 72, 18),
@@ -1852,14 +1885,16 @@ mod tests {
         assert!(key_hints(Screen::ArchitectureScaffold).contains("T repo tree"));
         assert!(key_hints(Screen::ArchitectureScaffold).contains("-/+ zoom"));
         assert!(key_hints(Screen::ArchitectureScaffold).contains("h/j/k/l pan"));
-        assert_eq!(key_hints(Screen::Input), "Enter scan | ? help | q quit");
+        // q and ? are typed as text on the input screen, so only Ctrl-C quits there.
+        assert_eq!(key_hints(Screen::Input), "Enter scan | Ctrl-C quit");
         assert_eq!(key_hints(Screen::RepoScan), "? help | q quit");
     }
 
     #[test]
-    fn impact_scores_accept_ten_point_scale() {
-        assert_eq!(impact_score_out_of_10(10), 10);
-        assert_eq!(impact_score_out_of_10(7), 7);
+    fn impact_scores_render_from_hundred_point_scale() {
+        // Scores are stored 0-100; ten-point model output is rescaled at parse time.
+        assert_eq!(impact_score_out_of_10(10), 1);
+        assert_eq!(impact_score_out_of_10(70), 7);
         assert_eq!(impact_score_out_of_10(82), 8);
         assert_eq!(impact_score_out_of_10(100), 10);
     }

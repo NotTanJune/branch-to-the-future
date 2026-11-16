@@ -1,7 +1,9 @@
+#[cfg(feature = "fx")]
 use ratatui::{
     layout::Margin,
     style::{Color, Style},
 };
+#[cfg(feature = "fx")]
 use tachyonfx::{
     fx::{self, ExpandDirection, RepeatMode},
     CellFilter, Effect, EffectTimer, Interpolation, Motion,
@@ -9,15 +11,67 @@ use tachyonfx::{
 
 use crate::domain::AnimationStage;
 
-#[cfg(test)]
+#[cfg(feature = "fx")]
+pub use tachyonfx::{Duration as FxDuration, EffectManager};
+
+/// No-op stand-ins used when the `fx` feature is disabled, so the TUI
+/// compiles and runs without transition effects.
+#[cfg(not(feature = "fx"))]
+mod noop {
+    use ratatui::{buffer::Buffer, layout::Rect};
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct FxDuration;
+
+    impl FxDuration {
+        pub fn from_millis(_millis: u32) -> Self {
+            Self
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct Effect;
+
+    pub struct EffectManager<K>(std::marker::PhantomData<K>);
+
+    impl<K> Default for EffectManager<K> {
+        fn default() -> Self {
+            Self(std::marker::PhantomData)
+        }
+    }
+
+    impl<K> EffectManager<K> {
+        pub fn add_unique_effect(&mut self, _key: K, _effect: Effect) {}
+
+        pub fn process_effects(
+            &mut self,
+            _duration: FxDuration,
+            _buffer: &mut Buffer,
+            _area: Rect,
+        ) {
+        }
+    }
+}
+
+#[cfg(not(feature = "fx"))]
+pub use noop::{Effect, EffectManager, FxDuration};
+
+#[cfg(not(feature = "fx"))]
+pub fn stage_effect(_stage: AnimationStage) -> Effect {
+    Effect
+}
+
+#[cfg(all(test, feature = "fx"))]
 const SCREEN_TRANSITION_STAGES: [AnimationStage; 4] = [
     AnimationStage::RepoMaterialize,
     AnimationStage::ImpactToFutures,
     AnimationStage::FuturesToImpact,
     AnimationStage::DiagramReveal,
 ];
+#[cfg(feature = "fx")]
 const SCREEN_TRANSITION_MS: u32 = 1600;
 
+#[cfg(feature = "fx")]
 pub fn stage_effect(stage: AnimationStage) -> Effect {
     let text_only = CellFilter::AllOf(vec![CellFilter::Inner(Margin::new(1, 1)), CellFilter::Text]);
     match stage {
@@ -101,6 +155,7 @@ pub fn stage_effect(stage: AnimationStage) -> Effect {
     }
 }
 
+#[cfg(feature = "fx")]
 fn screen_bounce_transition() -> Effect {
     let style = Style::default()
         .fg(Color::from_u32(0x32302F))
@@ -113,7 +168,7 @@ fn screen_bounce_transition() -> Effect {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "fx"))]
 mod tests {
     use ratatui::{buffer::Buffer, layout::Rect};
     use tachyonfx::Duration;

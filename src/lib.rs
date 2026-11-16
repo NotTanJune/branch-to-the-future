@@ -1,9 +1,13 @@
 pub mod ai;
 pub mod app;
 pub mod artifacts;
+pub mod blast;
 pub mod cli;
 pub mod domain;
 pub mod fx;
+pub mod machine;
+pub mod notion;
 pub mod repo;
 pub mod repo_source;
 pub mod ui;
+pub mod watch;
