@@ -18,7 +18,6 @@ https://github.com/user-attachments/assets/2177c491-30cb-4789-8b9c-be0a9e9a7d19
 - OpenAI API key
 - Notion CLI `ntn`, required for TUI export
 - Terminal with interactive TUI support
-- Optional: Claude Code and Rex, for the `brf-blast` mod and its side pane
 
 ## Install
 
@@ -220,33 +219,6 @@ JSON fields: `schema_version`, `tool`, `kind` (`"blast"`), `created_at`, `repo_r
 Imports are resolved by heuristic (JS/TS relative and `@/` or `~/` aliases, Python dotted modules, Rust `use` paths). Depth 1 files import a changed file; depth 2 files import a depth 1 file.
 
 Watch keys: `q` or `Esc` quit, `Tab`/`Shift-Tab` (or `h`/`l`) switch between the Changed, Blast radius and Summary panels (the selected one has a cyan border), `j`/`k` move the highlighted row, `g`/`G` jump to the ends, `PageUp`/`PageDown` move ten rows, `r` rescan (the header shows `rescanned` or `rescanned, no change`), `a` run OpenAI analysis of the diff (needs `OPENAI_API_KEY`; a new diff marks the result stale).
-
-### Claude Code Mod
-
-`integrations/claude-code/brf-blast` is a Claude Code mod that puts `brf` beside the agent:
-
-- Before the permission prompt for every Edit, Write or NotebookEdit inside the repo, it runs `brf blast --json <repo> --path <file>` and shows `brf <level> <score>/10 · <n> impacted` in the status line.
-- On a high radius it raises a toast and adds a note to the tool result, so the model checks impacted files and related tests. It never blocks an edit and fails open.
-- Inside Rex, the first edit opens a right split running `brf watch <repo>`, which reruns on every working-tree change.
-- `/brf` opens the pane, `/brf status` prints the current radius, `/brf close` closes the pane.
-
-Load it for one session:
-
-```bash
-claude --plugin-dir integrations/claude-code/brf-blast
-```
-
-To load it in every Claude Code session, add the folder's absolute path to the `env` block of `~/.claude/settings.json`:
-
-```json
-{
-  "env": {
-    "CLAUDE_CODE_PLUGIN_DIRS": "/absolute/path/to/branch-to-the-future/integrations/claude-code/brf-blast"
-  }
-}
-```
-
-The mod only acts inside git repositories and needs `brf` on `PATH` or at `~/.cargo/bin/brf`. Elsewhere it does nothing. Check it with `claude plugin validate integrations/claude-code/brf-blast` and `claude plugin test integrations/claude-code/brf-blast`.
 
 ## Python Agent Sidecar
 
@@ -489,18 +461,11 @@ Blast radius and watch mode run beside the main TUI and need no API key:
 
 ```text
 +-------------------------+       +-------------------------+
-| Claude Code mod         | ----> | brf blast --json        |
-| integrations/claude-    |       | src/blast.rs            |
-| code/brf-blast          |       | git diff + import graph |
-| status, toast, Rex pane |       | score, level, reasons   |
-+-----------+-------------+       +-----------+-------------+
-            |                                 ^
-            v                                 |
-+-------------------------+                   |
-| brf watch               | ------------------+
-| src/watch.rs            |  rescans when the diff fingerprint changes,
-| panels, cursor, AI key  |  `a` runs the OpenAI analysis on the diff
-+-------------------------+
+| brf watch               | ----> | brf blast --json        |
+| src/watch.rs            |       | src/blast.rs            |
+| panels, cursor, AI key  |       | git diff + import graph |
+|                         | <---- | score, level, reasons   |
++-------------------------+       +-------------------------+
 ```
 
 ## Analysis Structure
@@ -592,7 +557,6 @@ Run tests:
 ```bash
 make test
 uv run pytest
-claude plugin test integrations/claude-code/brf-blast
 ```
 
 Format code:

@@ -146,15 +146,10 @@ cargo install --path . --force
 brf --help
 ```
 
-## Claude Code Mod
+## Integrations Removed (2026-11-24)
 
-- `integrations/claude-code/brf-blast/` is a Claude Code mod (function hooks module `hooks/register.ts`, state contract `types/index.d.ts`, tests `hooks/register.test.ts`).
-- It hooks `tool.call` for Edit, Write and NotebookEdit, runs `brf blast --json <repo> --path <file>` before the permission prompt, sets the status line, and on `level == "high"` raises a toast and appends a model note to the tool result. It never denies and fails open.
-- Inside Rex (`REX_SESSION`, `REX_BLOCK`), it opens one right split labelled `brf` running `brf watch <repo>`; the block id is kept in `$.state` key `brf-blast.pane`.
-- `/brf`, `/brf status`, `/brf close`. Verify with `claude plugin validate` and `claude plugin test` on the folder.
-- Score covers the whole working tree plus the proposed file, not the single edit in isolation.
-- The repo root is resolved per edited file with `git -C <dir> rev-parse --show-toplevel --show-prefix` (cached per directory on success only). The pane opens only after a successful blast; an old `brf` without `blast` is reported by `/brf status`.
-- Loaded globally through `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`, pointing at this folder.
+- The Claude Code mod (`integrations/claude-code/brf-blast`) and the Rex picker (`integrations/rex/brf-blast-pick.lua`) were deleted. Leaf is the Rex diff viewer now. `brf blast` and `brf watch` stay as plain CLI commands.
+- Local config was cleaned: `CLAUDE_CODE_PLUGIN_DIRS` removed from `~/.claude/settings.json`, the `brf-blast-pick` block removed from `~/.config/rex/init.lua`, `~/.claude/dev-mods/<id>/brf-blast` deleted. `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` was left in place.
 
 ## Hardening Pass (2026-11-16)
 
